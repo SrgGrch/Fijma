@@ -20,7 +20,8 @@ try {
   const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('plugin/ui.html', 'utf8');
   const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
-  const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [], async loadAsync() {}, on() {} };
+  let invalidate;
+  const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [{ id: '1:1', name: 'Target', type: 'TEXT' }], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };
   let ui, resolveBound;
   const bound = new Promise(resolve => resolveBound = resolve);
   const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, showUI() {}, ui: {
@@ -50,6 +51,14 @@ try {
   const tree = await client.callTool({ name: 'figma_get_tree', arguments: { scope, rootId: '0:1', depth: 1, limit: 10 } });
   assert.equal(tree.structuredContent.nodes[0].nodeId, '0:1');
   assert.deepEqual(JSON.parse(tree.content[0].text), tree.structuredContent);
+  const found = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, name: 'Target', types: ['TEXT'], limit: 10 } });
+  assert.equal(found.structuredContent.nodes[0].nodeId, '1:1');
+  assert.equal(found.structuredContent.nodes[0].pageId, '0:1');
+  const firstSearch = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, limit: 1 } });
+  assert.ok(firstSearch.structuredContent.nextCursor);
+  invalidate();
+  const changedSearch = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, limit: 1, cursor: firstSearch.structuredContent.nextCursor } });
+  assert.equal(changedSearch.structuredContent.error.code, 'INVALID_CURSOR');
   page.selection = [{ id: '1:1' }];
   assert.deepEqual((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.selection, ['1:1']);
   const stale = await client.callTool({ name: 'figma_get_tree', arguments: { scope: { ...scope, sessionId: 'old' }, rootId: '0:1', depth: 1, limit: 10 } });

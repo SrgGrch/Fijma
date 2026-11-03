@@ -21,6 +21,7 @@ export async function readTree(root: ReadableNode, limits: ReadLimits, options: 
   const frames: TreeContinuation = options.continuation?.map(frame => ({ ...frame })) ?? [{ children: [root], index: 0, depth: 0 }];
   let bytes = 2;
   let truncated = false;
+  let depthCut = false;
   let cancelled = false;
   while (frames.length) {
     if (options.stopped?.()) { cancelled = true; break; }
@@ -38,11 +39,11 @@ export async function readTree(root: ReadableNode, limits: ReadLimits, options: 
     bytes = nextBytes;
     if (node.children?.length) {
       if (frame.depth < limits.maxDepth) frames.push({ children: node.children, index: 0, depth: frame.depth + 1 });
-      else truncated = true;
+      else { truncated = true; depthCut = true; }
     }
     if (nodes.length % limits.chunkSize === 0) {
       await (options.yieldControl ?? (() => new Promise<void>(resolve => setTimeout(resolve, 0))))();
     }
   }
-  return { nodes, bytes, truncated: truncated || cancelled, cancelled, continuation: frames };
+  return { nodes, bytes, truncated: truncated || cancelled, depthCut, cancelled, continuation: frames };
 }

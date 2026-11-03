@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 import { negotiateHello } from '../shared/protocol';
 import { contextReplySchema, disconnectedContext, contextSchema } from '../shared/context';
-import { treeReplySchema } from '../shared/tree-result';
+import { treeReplySchema, searchReplySchema } from '../shared/tree-result';
 import { toolInputs } from '../shared/contracts';
 
 const pairSchema = z.strictObject({ type: z.literal('pair'), secret: z.string().length(64).regex(/^[0-9a-f]+$/) });
@@ -15,7 +15,7 @@ export async function createPairingListener(secret: string, port: number) {
   let active: WebSocket | undefined;
   let generation = randomInt(1, 2 ** 48);
   let binding: ReturnType<typeof negotiateHello> | undefined;
-  let pending: { kind: 'context' | 'tree'; id: string; promise: Promise<unknown>; resolve: (value: unknown) => void; reject: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
+  let pending: { kind: 'context' | 'tree' | 'search'; id: string; promise: Promise<unknown>; resolve: (value: unknown) => void; reject: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
   const failPending = () => {
     if (!pending) return;
     const current = pending; pending = undefined; clearTimeout(current.timer); current.reject();
@@ -55,8 +55,8 @@ export async function createPairingListener(secret: string, port: number) {
           socket.on('message', (bytes, binary) => {
             try {
               if (binary) throw new Error('PROTOCOL_MISMATCH');
-              if (pending?.kind === 'tree') {
-                const reply = treeReplySchema.parse(JSON.parse(bytes.toString()));
+              if (pending?.kind === 'tree' || pending?.kind === 'search') {
+                const reply = (pending.kind === 'tree' ? treeReplySchema : searchReplySchema).parse(JSON.parse(bytes.toString()));
                 if (!binding || reply.operationId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const current = pending; pending = undefined; clearTimeout(current.timer);
                 current.resolve(reply.error ? { error: reply.error } : reply.data);
@@ -66,7 +66,7 @@ export async function createPairingListener(secret: string, port: number) {
               if (!binding || !pending || reply.requestId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
               const current = pending; pending = undefined; clearTimeout(current.timer);
               current.resolve(contextSchema.parse({ ...reply.document, state: 'ready', sessionId: binding.sessionId,
-                connectionGeneration: binding.connectionGeneration, writeEnabled: false, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree'].includes(item)), limits: binding.limits }));
+                connectionGeneration: binding.connectionGeneration, writeEnabled: false, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes'].includes(item)), limits: binding.limits }));
             } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
           });
         } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
@@ -88,25 +88,27 @@ export async function createPairingListener(secret: string, port: number) {
     pending = { kind: 'context', id: randomUUID(), promise, resolve, reject, timer: setTimeout(failPending, 5000) };
     active.send(JSON.stringify({ type: 'getContext', requestId: pending.id, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration }));
     return promise;
-  }, async getTree(raw: unknown) {
+  }, async getTree(raw: unknown) { return read('getTree', raw); }, async findNodes(raw: unknown) { return read('findNodes', raw); }, async close() {
+    failPending();
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  } };
+
+  async function read(command: 'getTree' | 'findNodes', raw: unknown) {
     if (!active || !binding) throw new Error('NOT_CONNECTED');
-    const input = toolInputs.figma_get_tree.parse(raw);
+    const input = command === 'getTree' ? toolInputs.figma_get_tree.parse(raw) : toolInputs.figma_find_nodes.parse(raw);
     if (input.scope.sessionId !== binding.sessionId || input.scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
-    if (!binding.capabilities.includes('getTree')) throw new Error('CAPABILITY_UNAVAILABLE');
-    if (input.depth > binding.limits.maxDepth || input.limit > binding.limits.maxNodes) throw new Error('RESOURCE_LIMIT');
+    if (!binding.capabilities.includes(command)) throw new Error('CAPABILITY_UNAVAILABLE');
+    if (('depth' in input && input.depth > binding.limits.maxDepth) || input.limit > binding.limits.maxNodes) throw new Error('RESOURCE_LIMIT');
     if (pending) throw new Error('RESOURCE_LIMIT');
     const timestamp = Date.now().toString(16).padStart(12, '0');
     const random = randomUUID();
     const operationId = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random.slice(15, 18)}-${random.slice(19)}`;
     let resolve!: (value: unknown) => void, reject!: () => void;
     const promise = new Promise((yes, no) => { resolve = yes; reject = () => no(new Error('NOT_CONNECTED')); });
-    pending = { kind: 'tree', id: operationId, promise, resolve, reject, timer: setTimeout(failPending, 5000) };
+    pending = { kind: command === 'getTree' ? 'tree' : 'search', id: operationId, promise, resolve, reject, timer: setTimeout(failPending, 5000) };
     const { scope, ...params } = input;
-    active.send(JSON.stringify({ type: 'command', ...scope, operationId, command: 'getTree', params }));
+    active.send(JSON.stringify({ type: 'command', ...scope, operationId, command, params }));
     return promise;
-  }, async close() {
-    failPending();
-    for (const client of server.clients) client.terminate();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  } };
+  }
 }
