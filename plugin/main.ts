@@ -36,7 +36,7 @@ figma.ui.onmessage = async message => {
       maxResponseBytes: parsed.data.limits.maxResponseBytes, chunkSize: 50 }, 100, parsed.data.limits.resourceTtl);
     awaitingWelcome = false;
     figma.ui.postMessage({ type: 'bound', sessionId, connectionGeneration, documentLabel: figma.root.name,
-      writeEnabled: false, message: 'Сопряжено. Команды документа ещё не подключены.' });
+      writeEnabled: false, message: 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
   } else if (message.type === 'disconnected' && Object.keys(message).length === 1) {
     awaitingWelcome = false;
     connectionGeneration = undefined;

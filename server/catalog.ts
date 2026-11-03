@@ -24,9 +24,16 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
       outputSchema: name === 'figma_get_context' ? contextSchema : name === 'figma_get_tree' ? treeOutputSchema : toolErrorSchema,
     }, async args => {
       let output;
-      try { output = name === 'figma_get_context' ? contextSchema.parse(await getContext()) : name === 'figma_get_tree' && getTree ? treeOutputSchema.parse(await getTree(args)) : {
-        error: { code: 'NOT_CONNECTED', message: 'Плагин Figma не подключён.', recoveryAction: 'Подключите плагин и получите новый контекст.' },
-      }; } catch (error) {
+      try {
+        if (name === 'figma_get_context') output = contextSchema.parse(await getContext());
+        else if (name === 'figma_get_tree' && getTree) output = treeOutputSchema.parse(await getTree(args));
+        else {
+          const context = contextSchema.parse(await getContext());
+          output = { error: { code: context.state === 'ready' ? 'CAPABILITY_UNAVAILABLE' : 'NOT_CONNECTED',
+            message: context.state === 'ready' ? 'Обработчик инструмента ещё не подключён.' : 'Плагин Figma не подключён.',
+            recoveryAction: 'Проверьте capabilities текущего контекста.' } };
+        }
+      } catch (error) {
         const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
         output = { error: { code, message: 'Запрос документа недоступен.', recoveryAction: 'Переподключите плагин и повторите чтение контекста.' } };
       }

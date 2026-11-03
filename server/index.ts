@@ -15,6 +15,7 @@ try {
   process.exit(1);
 }
 process.stderr.write(`Файл сопряжения: ${pairing.path}\n`);
+process.stderr.write(`Локальный мост: ws://127.0.0.1:${listener.address.port}\n`);
 const server = createServer(() => listener.getContext(), args => listener.getTree(args));
 let closing = false;
 const close = async () => {
