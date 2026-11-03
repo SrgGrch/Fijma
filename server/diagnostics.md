@@ -1,0 +1,11 @@
+# Журнал метаданных
+
+`createDiagnosticsSession` предназначен для вызова из процесса сервера после авторизации плагина. Он принимает scope, полученный из активного соединения, и секрет сопряжения для исключения из записей. Нельзя создавать scope из полей запроса MCP или считать данные запроса подтверждёнными ID.
+
+`readCompleted(action, {operationId,durationMs})` записывает успешное чтение без ID из запроса. `operationCompleted(action, timing, result)` сначала проверяет полный результат операции и его scope/operationId, затем записывает только подтверждённые affectedNodeIds/affectedResourceIds и статус. `failed(action, timing, code)` принимает только код ошибки; неизвестный код заменяется на FIGMA_API_ERROR. Текст ошибки, payload, текст макета, изображения и произвольные поля не сохраняются. Ошибки журнала подавляются, чтобы не менять результат операции; некорректная запись может быть пропущена.
+
+По умолчанию включены только метаданные в ограниченном буфере памяти (200 последних записей на экземпляр). Расширенная диагностика по умолчанию выключена. Установите локальную переменную запуска `FIGMA_MCP_DIAGNOSTICS_TTL_MS` в целое число миллисекунд от 1 до 300000 для явного включения: она добавляет только код ошибки, число шагов и поколение соединения, а не содержимое документа. Неверное значение оставляет расширенную диагностику выключенной. После TTL дополнительные записи удаляются. `read()` возвращает копию, `clear()` очищает оба буфера и выключает расширенную диагностику; при завершении процесса память освобождается. Это локальные методы процесса, не MCP-инструменты и не возможность управлять сервером через документ.
+
+The production listener records reads, exports and validated operation results for the authenticated scope. Read request IDs are not stored. Operation metadata includes confirmed affected IDs; diagnostic records never include text, images, error messages or font names. Error responses retain only the code and, for FONT_UNAVAILABLE, a bounded validated font list that cannot contain the pairing secret.
+
+`listener.readDiagnostics()` and `listener.clearDiagnostics()` are local process methods, not MCP tools. Disconnect or listener shutdown clears and closes the journal. Operation outcomes from an earlier generation are not recorded as current-generation events.
