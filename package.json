@@ -12,7 +12,7 @@
     "build:plugin": "esbuild plugin/main.ts --bundle --target=es2017 --outfile=dist/plugin/main.js && node scripts/copy-plugin.mjs",
     "start": "node dist/server/index.js",
     "build:diagnostics": "esbuild experiments/diagnostics/main.ts --bundle --target=es2017 --outfile=experiments/diagnostics/main.js",
-    "test": "npm run build && node tests/contracts.mjs && node tests/operation-result-contracts.mjs && node tests/catalog-contracts.mjs && node tests/protocol.mjs && node tests/pairing.mjs && node tests/plugin-handshake.mjs && node tests/ui-validation.mjs && node tests/smoke.mjs && node tests/full-bridge.mjs && node tests/document.mjs && node tests/tree-pager.mjs && node tests/projections.mjs && node tests/resources-read.mjs && node tests/batch-refs.mjs && node tests/operation-journal.mjs && node tests/read-tree.mjs && node tests/diagnostics.mjs && node tests/limits-probe.mjs && node tests/resources-probe.mjs"
+    "test": "npm run build && node tests/contracts.mjs && node tests/operation-result-contracts.mjs && node tests/catalog-contracts.mjs && node tests/protocol.mjs && node tests/pairing.mjs && node tests/plugin-handshake.mjs && node tests/ui-validation.mjs && node tests/smoke.mjs && node tests/full-bridge.mjs && node tests/document.mjs && node tests/tree-pager.mjs && node tests/projections.mjs && node tests/resources-read.mjs && node tests/batch-refs.mjs && node tests/operation-journal.mjs && node tests/batch-executor.mjs && node tests/scene-ops.mjs && node tests/geometry-ops.mjs && node tests/read-tree.mjs && node tests/diagnostics.mjs && node tests/limits-probe.mjs && node tests/resources-probe.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",

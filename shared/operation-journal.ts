@@ -51,6 +51,11 @@ export class OperationJournal {
     return entry ? { status: entry.status, result: entry.result } : { status: 'unknown' };
   }
 
+  has(operationId: string): boolean {
+    this.timestamp(operationId);
+    return this.entries.has(operationId);
+  }
+
   update(operationId: string, status: OperationStatus, result?: unknown) {
     const entry = this.entries.get(operationId);
     if (!entry) throw new Error('OUTCOME_UNKNOWN');
