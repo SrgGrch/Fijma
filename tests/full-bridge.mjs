@@ -23,11 +23,16 @@ try {
   let invalidate;
   const textNode = { id: '1:1', name: 'Target', type: 'TEXT', visible: false, locked: true };
   const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [textNode], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };
+  const otherNode = { id: '2:1', name: 'Other', type: 'RECTANGLE' };
+  const otherPage = { id: '0:2', name: 'Other page', type: 'PAGE', selection: [], children: [otherNode], async loadAsync() {}, on() {} };
   textNode.parent = page;
+  otherNode.parent = otherPage;
+  let revealed = [];
   let ui, resolveBound;
   const bound = new Promise(resolve => resolveBound = resolve);
-  const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, mixed: Symbol('mixed'),
-    getNodeByIdAsync: async id => id === textNode.id ? textNode : null,
+  const figma = { root: { name: 'Test document', children: [page, otherPage] }, currentPage: page, mixed: Symbol('mixed'),
+    getNodeByIdAsync: async id => id === textNode.id ? textNode : id === otherNode.id ? otherNode : null,
+    async setCurrentPageAsync(next) { this.currentPage = next; }, viewport: { scrollAndZoomIntoView(nodes) { revealed = Array.from(nodes, node => node.id); } },
     variables: { getLocalVariablesAsync: async () => [{ id: 'v1', name: 'Color', resolvedType: 'COLOR', variableCollectionId: 'c', valuesByMode: { m: { type: 'VARIABLE_ALIAS', id: 'v2' } } }] },
     showUI() {}, ui: {
     postMessage(message) { queueMicrotask(() => {
@@ -66,6 +71,17 @@ try {
   assert.equal(nodes.structuredContent.nodes[1].error.code, 'NODE_NOT_FOUND');
   const variables = await client.callTool({ name: 'figma_get_local_resources', arguments: { scope, kind: 'variables', fields: ['name', 'type', 'valuesByMode'], limit: 10 } });
   assert.equal(variables.structuredContent.resources[0].properties.valuesByMode.m.id, 'v2');
+  const otherTree = await client.callTool({ name: 'figma_get_tree', arguments: { scope, rootId: '0:2', depth: 1, limit: 10 } });
+  assert.equal(otherTree.structuredContent.nodes[0].nodeId, '0:2');
+  assert.equal(figma.currentPage, page);
+  assert.deepEqual(page.selection, []);
+  assert.deepEqual(revealed, []);
+  textNode.name = 'Manually changed';
+  invalidate();
+  const fresh = await client.callTool({ name: 'figma_get_nodes', arguments: { scope, nodeIds: ['1:1'], fields: ['name'] } });
+  assert.equal(fresh.structuredContent.nodes[0].properties.name, 'Manually changed');
+  assert.equal(figma.currentPage, page);
+  assert.deepEqual(revealed, []);
   const firstSearch = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, limit: 1 } });
   assert.ok(firstSearch.structuredContent.nextCursor);
   invalidate();
@@ -77,6 +93,10 @@ try {
   assert.equal(stale.structuredContent.error.code, 'SESSION_EXPIRED');
   const unsupported = await client.callTool({ name: 'figma_export_node', arguments: { scope, nodeId: '0:1', format: 'PNG' } });
   assert.equal(unsupported.structuredContent.error.code, 'CAPABILITY_UNAVAILABLE');
+  const navigation = await client.callTool({ name: 'figma_navigate', arguments: { scope, nodeIds: ['2:1'], select: true, reveal: true } });
+  assert.equal(navigation.structuredContent.currentPageId, '0:2');
+  assert.deepEqual(navigation.structuredContent.selection, ['2:1']);
+  assert.deepEqual(revealed, ['2:1']);
   elements.disconnect.onclick();
   console.log('Сквозной stdio → WebSocket → UI → main: контекст, пустая страница, дерево, живое выделение и stale scope — OK');
 } finally {

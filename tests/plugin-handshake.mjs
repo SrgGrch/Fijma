@@ -42,11 +42,17 @@ const beforeChange = messages.pop();
 invalidate();
 await figma.ui.onmessage({ ...command, params: { ...command.params, cursor: beforeChange.data.nextCursor } });
 assert.equal(messages.pop().error.code, 'INVALID_CURSOR');
+await figma.ui.onmessage(command);
+const beforeReconnect = messages.pop();
 figma.ui.onmessage({ type: 'disconnected' });
 figma.ui.onmessage(welcome);
 assert.equal(messages.length, 0);
 figma.ui.onmessage({ type: 'hello-request', extra: true });
 assert.equal(messages.length, 0);
+figma.ui.onmessage({ type: 'hello-request' }); messages.pop();
+figma.ui.onmessage({ ...welcome, connectionGeneration: 11 }); messages.pop();
+await figma.ui.onmessage({ ...command, connectionGeneration: 11, params: { ...command.params, cursor: beforeReconnect.data.nextCursor } });
+assert.equal(messages.pop().error.code, 'INVALID_CURSOR');
 console.log('Main: hello, чужая сессия, welcome и отключение — OK');
 
 const html = await readFile('dist/plugin/ui.html', 'utf8');

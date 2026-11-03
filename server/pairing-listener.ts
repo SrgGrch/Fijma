@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 import { negotiateHello } from '../shared/protocol';
 import { contextReplySchema, disconnectedContext, contextSchema } from '../shared/context';
-import { treeReplySchema, searchReplySchema, nodesReplySchema, resourcesReplySchema } from '../shared/tree-result';
+import { treeReplySchema, searchReplySchema, nodesReplySchema, resourcesReplySchema, navigateReplySchema } from '../shared/tree-result';
 import { toolInputs } from '../shared/contracts';
 
 const pairSchema = z.strictObject({ type: z.literal('pair'), secret: z.string().length(64).regex(/^[0-9a-f]+$/) });
@@ -15,7 +15,7 @@ export async function createPairingListener(secret: string, port: number) {
   let active: WebSocket | undefined;
   let generation = randomInt(1, 2 ** 48);
   let binding: ReturnType<typeof negotiateHello> | undefined;
-  let pending: { kind: 'context' | 'tree' | 'search' | 'nodes' | 'resources'; id: string; promise: Promise<unknown>; resolve: (value: unknown) => void; reject: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
+  let pending: { kind: 'context' | 'tree' | 'search' | 'nodes' | 'resources' | 'navigate'; id: string; promise: Promise<unknown>; resolve: (value: unknown) => void; reject: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
   const failPending = () => {
     if (!pending) return;
     const current = pending; pending = undefined; clearTimeout(current.timer); current.reject();
@@ -56,7 +56,7 @@ export async function createPairingListener(secret: string, port: number) {
             try {
               if (binary) throw new Error('PROTOCOL_MISMATCH');
               if (pending && pending.kind !== 'context') {
-                const schemas = { tree: treeReplySchema, search: searchReplySchema, nodes: nodesReplySchema, resources: resourcesReplySchema };
+                const schemas = { tree: treeReplySchema, search: searchReplySchema, nodes: nodesReplySchema, resources: resourcesReplySchema, navigate: navigateReplySchema };
                 const reply = schemas[pending.kind].parse(JSON.parse(bytes.toString()));
                 if (!binding || reply.operationId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const current = pending; pending = undefined; clearTimeout(current.timer);
@@ -67,7 +67,7 @@ export async function createPairingListener(secret: string, port: number) {
               if (!binding || !pending || reply.requestId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
               const current = pending; pending = undefined; clearTimeout(current.timer);
               current.resolve(contextSchema.parse({ ...reply.document, state: 'ready', sessionId: binding.sessionId,
-                connectionGeneration: binding.connectionGeneration, writeEnabled: false, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources'].includes(item)), limits: binding.limits }));
+                connectionGeneration: binding.connectionGeneration, writeEnabled: false, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'].includes(item)), limits: binding.limits }));
             } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
           });
         } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
@@ -90,16 +90,17 @@ export async function createPairingListener(secret: string, port: number) {
     active.send(JSON.stringify({ type: 'getContext', requestId: pending.id, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration }));
     return promise;
   }, async getTree(raw: unknown) { return read('getTree', raw); }, async findNodes(raw: unknown) { return read('findNodes', raw); },
-    async getNodes(raw: unknown) { return read('getNodes', raw); }, async getLocalResources(raw: unknown) { return read('getLocalResources', raw); }, async close() {
+    async getNodes(raw: unknown) { return read('getNodes', raw); }, async getLocalResources(raw: unknown) { return read('getLocalResources', raw); },
+    async navigate(raw: unknown) { return read('navigate', raw); }, async close() {
     failPending();
     for (const client of server.clients) client.terminate();
     await new Promise<void>(resolve => server.close(() => resolve()));
   } };
 
-  async function read(command: 'getTree' | 'findNodes' | 'getNodes' | 'getLocalResources', raw: unknown) {
+  async function read(command: 'getTree' | 'findNodes' | 'getNodes' | 'getLocalResources' | 'navigate', raw: unknown) {
     if (!active || !binding) throw new Error('NOT_CONNECTED');
     const inputs = { getTree: toolInputs.figma_get_tree, findNodes: toolInputs.figma_find_nodes,
-      getNodes: toolInputs.figma_get_nodes, getLocalResources: toolInputs.figma_get_local_resources };
+      getNodes: toolInputs.figma_get_nodes, getLocalResources: toolInputs.figma_get_local_resources, navigate: toolInputs.figma_navigate };
     const input = inputs[command].parse(raw);
     if (input.scope.sessionId !== binding.sessionId || input.scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
     if (!binding.capabilities.includes(command)) throw new Error('CAPABILITY_UNAVAILABLE');
@@ -111,7 +112,7 @@ export async function createPairingListener(secret: string, port: number) {
     const operationId = `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7${random.slice(15, 18)}-${random.slice(19)}`;
     let resolve!: (value: unknown) => void, reject!: () => void;
     const promise = new Promise((yes, no) => { resolve = yes; reject = () => no(new Error('NOT_CONNECTED')); });
-    const kinds = { getTree: 'tree', findNodes: 'search', getNodes: 'nodes', getLocalResources: 'resources' } as const;
+    const kinds = { getTree: 'tree', findNodes: 'search', getNodes: 'nodes', getLocalResources: 'resources', navigate: 'navigate' } as const;
     pending = { kind: kinds[command], id: operationId, promise, resolve, reject, timer: setTimeout(failPending, 5000) };
     const { scope, ...params } = input;
     active.send(JSON.stringify({ type: 'command', ...scope, operationId, command, params }));

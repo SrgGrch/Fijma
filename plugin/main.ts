@@ -6,11 +6,12 @@ import { loadDocumentRoot } from './document';
 import { createUIYield } from '../shared/ui-yield';
 import { readNodes } from './projections';
 import { ResourcePager } from './resources';
+import { navigate } from './navigation';
 
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources'];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'];
 const scheduler = createUIYield(message => figma.ui.postMessage(message));
 let pager = new TreePager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
 let search = new SearchPager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
@@ -74,14 +75,21 @@ figma.ui.onmessage = async message => {
     try {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources'].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
       if (reading) throw new Error('RESOURCE_LIMIT');
     } catch { figma.ui.postMessage({ type: 'error', code: 'INVALID_ARGUMENT' }); return; }
     reading = true;
     const scope = { sessionId, connectionGeneration };
-    const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult' };
+    const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult', navigate: 'navigateResult' };
     const reply = { type: replyType[command.command as keyof typeof replyType], ...scope, operationId: command.operationId };
     try {
+      if (command.command === 'navigate') {
+        const query = command.params as { pageId?: string; nodeIds: string[]; select: boolean; reveal: boolean };
+        if (query.nodeIds.length > limits.maxNodes) throw new Error('RESOURCE_LIMIT');
+        const data = await navigate(figma, query, () => { if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); });
+        figma.ui.postMessage({ ...reply, data });
+        return;
+      }
       if (command.command === 'getNodes') {
         const query = command.params as { nodeIds: string[]; fields: string[] };
         const data = await readNodes(figma, query.nodeIds, query.fields, limits.maxNodes, limits.maxResponseBytes, scheduler.wait);
