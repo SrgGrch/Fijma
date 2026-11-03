@@ -12,7 +12,7 @@ nodes.set(parent.id, parent);
 function textNode(fonts = [inter], text = 'Hello') {
   const n = { id: `text:${++serial}`, type: 'TEXT', name: 'Text', characters: text, fontName: fonts.length === 1 ? fonts[0] : Symbol('mixed'), fonts, textStyleId: '', boundVariables: {}, fontSize: 12, hasMissingFont: false,
     getRangeAllFontNames() { return this.fonts; },
-    getStyledTextSegments() { return this.fonts.map(fontName => ({ fontName, textStyleId: '', boundVariables: {} })); },
+    getStyledTextSegments() { return this.fonts.map(fontName => ({ fontName, textStyleId: this.textStyleId, boundVariables: this.boundVariables })); },
   };
   nodes.set(n.id, n); return n;
 }

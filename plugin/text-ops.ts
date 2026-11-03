@@ -1,4 +1,5 @@
 import type { BatchStep } from '../shared/batch-refs';
+import { checkTextPatch } from './text-links';
 
 type Font = { family: string; style: string };
 type Changes = { nodeIds: string[]; resourceIds: string[] };
@@ -23,12 +24,18 @@ export function textOperations(figma: TextApi) {
     if (!Array.isArray(list) || !list.length || list.some((font: any) => !validFont(font))) throw new Error('FONT_UNAVAILABLE');
     return list as Font[];
   };
-  const signature = () => JSON.stringify([node.characters, fonts().map(font => [font.family, font.style]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
-  const checkBindings = () => {
-    if (node.textStyleId || node.boundVariables && Object.keys(node.boundVariables).length) throw new Error('CAPABILITY_UNAVAILABLE');
-    if (node.characters.length) {
-      const segments = node.getStyledTextSegments(['textStyleId', 'boundVariables']);
-      if (segments.some((segment: any) => segment.textStyleId || segment.boundVariables && Object.keys(segment.boundVariables).length)) throw new Error('CAPABILITY_UNAVAILABLE');
+  const segments = () => node.characters.length ? node.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables', 'textStyleOverrides']) : [];
+  const signature = () => JSON.stringify([node.characters, segments(), node.textStyleId, node.fillStyleId, node.boundVariables, fonts()]);
+  const checkBindings = (step: BatchStep) => {
+    const spans = segments();
+    if (step.op === 'setText') {
+      if (node.boundVariables?.characters || typeof node.textStyleId === 'symbol' || typeof node.fillStyleId === 'symbol') throw new Error('CAPABILITY_UNAVAILABLE');
+      if (!step.characters && (node.textStyleId || node.fillStyleId || Object.keys(node.boundVariables ?? {}).length)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (spans.some((span: any) => span.textStyleId !== node.textStyleId || span.fillStyleId && span.fillStyleId !== node.fillStyleId || span.textStyleOverrides?.length || Object.entries(span.boundVariables ?? {}).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(node.boundVariables?.[key])))) throw new Error('CAPABILITY_UNAVAILABLE');
+    } else {
+      const patch = step.patch as Record<string, unknown>;
+      checkTextPatch(spans.length ? spans : [{ textStyleId: node.textStyleId, fillStyleId: node.fillStyleId, boundVariables: node.boundVariables }], patch);
+      checkTextPatch([{ boundVariables: node.boundVariables }], patch);
     }
   };
   const project = (target: any, expected: Record<string, unknown>) => {
@@ -36,6 +43,7 @@ export function textOperations(figma: TextApi) {
     for (const key of Object.keys(expected)) {
       if (key === 'parentId') result[key] = target.parent?.id;
       else if (key === 'children' && 'children' in target) result[key] = target.children.map((child: any) => child.id);
+      else if (key === 'textSegments' && target.type === 'TEXT') result[key] = target.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']);
       else if (['name', 'characters', ...fields, 'textStyleId', 'boundVariables'].includes(key) && key in target && typeof target[key] !== 'symbol') result[key] = target[key];
       else throw new Error('CAPABILITY_UNAVAILABLE');
     }
@@ -48,18 +56,18 @@ export function textOperations(figma: TextApi) {
       if (creating) {
         parent = await find((step.parent as { nodeId: string }).nodeId);
         if (!['PAGE', 'FRAME', 'GROUP', 'COMPONENT', 'SECTION'].includes(parent.type) || typeof parent.appendChild !== 'function') throw new Error('INVALID_ARGUMENT');
-      } else if (step.op === 'updateNode' && step.type === 'TEXT') {
+      } else if (step.op === 'setText' || step.op === 'updateNode' && step.type === 'TEXT') {
         node = await find((step.target as { nodeId: string }).nodeId);
         if (node.type !== 'TEXT') throw new Error('INVALID_ARGUMENT');
       } else throw new Error('CAPABILITY_UNAVAILABLE');
-      const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.patch) as Record<string, any>;
+      const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.op === 'setText' ? {} : step.patch) as Record<string, any>;
       if (Object.keys(typography).some(key => !fields.includes(key) && !common.includes(key) && !(creating && key === 'characters'))) throw new Error('CAPABILITY_UNAVAILABLE');
       if (typography.width !== undefined && typography.width < 0.01 || typography.height !== undefined && typography.height < 0.01) throw new Error('INVALID_ARGUMENT');
       const newFont = step.op === 'createText' ? step.font as Font : typography.fontName as Font | undefined;
       if (step.op === 'createNode' && !newFont && Object.keys(typography).some(key => fields.includes(key) || key === 'characters')) throw new Error('CAPABILITY_UNAVAILABLE');
       if (step.op === 'createText' && typography.fontName && !sameFont(newFont!, typography.fontName)) throw new Error('INVALID_ARGUMENT');
       const needed = node ? [...fonts()] : [];
-      if (node) { checkBindings(); original = signature(); }
+      if (node) { checkBindings(step); original = signature(); }
       if (newFont && !needed.some(font => sameFont(font, newFont))) needed.push(newFont);
       for (const font of needed.filter((f, i) => needed.findIndex(other => sameFont(f, other)) === i)) {
         try { await figma.loadFontAsync(font); } catch { throw new Error('FONT_UNAVAILABLE'); }
@@ -74,10 +82,10 @@ export function textOperations(figma: TextApi) {
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
       if (node?.removed || parent?.removed) throw new Error('NODE_NOT_FOUND');
-      if (node) { checkBindings(); if (signature() !== original) throw new Error('CONFLICT'); }
+      if (node) { if (signature() !== original) throw new Error('CONFLICT'); checkBindings(step); }
       const changed = (target: any) => record({ nodeIds: [target.id], resourceIds: [] });
       const creating = step.op === 'createText' || step.op === 'createNode';
-      const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.patch) as Record<string, any>;
+      const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.op === 'setText' ? {} : step.patch) as Record<string, any>;
       if (creating) {
         node = figma.createText(); changed(node);
         parent.appendChild(node);
@@ -85,6 +93,12 @@ export function textOperations(figma: TextApi) {
         if (font) { node.fontName = font; changed(node); }
         const characters = step.op === 'createText' ? step.characters : typography.characters;
         if (characters !== undefined) { node.characters = characters; changed(node); }
+      }
+      if (step.op === 'setText') {
+        const previousLength = node.characters.length;
+        const value = step.characters as string;
+        if (value) { node.insertCharacters(0, value, previousLength ? 'AFTER' : undefined); changed(node); }
+        if (previousLength) { node.deleteCharacters(value.length, value.length + previousLength); changed(node); }
       }
       for (const key of ['name', 'x', 'y', 'rotation', 'visible']) if (key in typography) { node[key] = typography[key]; changed(node); }
       for (const key of fields) {

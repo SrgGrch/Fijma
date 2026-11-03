@@ -1,4 +1,5 @@
 import type { BatchStep } from '../shared/batch-refs';
+import { checkTextPatch } from './text-links';
 
 type Font = { family: string; style: string };
 type Changes = { nodeIds: string[]; resourceIds: string[] };
@@ -17,12 +18,24 @@ export function textRangeOperations(figma: Api) {
   };
   const current = () => {
     if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
-    if (node.textStyleId || node.boundVariables && Object.keys(node.boundVariables).length) throw new Error('CAPABILITY_UNAVAILABLE');
-    const segments = node.characters.length ? node.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'boundVariables']) : [];
-    if (segments.some((s: any) => s.textStyleId || s.boundVariables && Object.keys(s.boundVariables).length)) throw new Error('CAPABILITY_UNAVAILABLE');
+    const segments = node.characters.length ? node.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']) : [];
     const fonts = node.characters.length ? node.getRangeAllFontNames(0, node.characters.length) : [node.fontName];
     if (!Array.isArray(fonts) || !fonts.length || fonts.some((font: any) => !isFont(font))) throw new Error('FONT_UNAVAILABLE');
-    return { fonts: fonts as Font[], signature: JSON.stringify([node.characters, segments, fonts]) };
+    return { fonts: fonts as Font[], segments, signature: JSON.stringify([node.characters, segments, fonts, node.boundVariables]) };
+  };
+  const checkLinks = (step: BatchStep, segments: any[]) => {
+    const start = step.start as number, end = step.end as number;
+    if (step.op === 'replaceTextRange' && (end > start || step.text) && node.boundVariables?.characters) throw new Error('CAPABILITY_UNAVAILABLE');
+    if (step.op === 'formatTextRange') checkTextPatch(segments.filter((s: any) => s.start < end && s.end > start), step.format as Record<string, unknown>);
+    else {
+      const insertion = step.insertionFormatting as any;
+      const inherited = insertion.inherit ?? (end < node.characters.length ? 'AFTER' : start > 0 ? 'BEFORE' : undefined);
+      const anchor = inherited === 'BEFORE' ? start - 1 : inherited === 'AFTER' ? end : -1;
+      if (segments.some((s: any) => s.boundVariables?.characters && (s.start < end && s.end > start || step.text && s.start <= anchor && s.end > anchor))) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (step.text && insertion.inherit && insertion.format) {
+        checkTextPatch(segments.filter((s: any) => s.start <= anchor && s.end > anchor), insertion.format);
+      }
+    }
   };
   const validate = (step: BatchStep) => {
     if (node.removed) throw new Error('NODE_NOT_FOUND');
@@ -42,6 +55,7 @@ export function textRangeOperations(figma: Api) {
     for (const key of Object.keys(expected)) {
       if (key === 'parentId') result[key] = target.parent?.id;
       else if (key === 'children' && 'children' in target) result[key] = target.children.map((child: any) => child.id);
+      else if (key === 'textSegments' && target.type === 'TEXT') result[key] = target.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']);
       else if (['name', 'characters', 'fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'textStyleId', 'boundVariables'].includes(key) && key in target && typeof target[key] !== 'symbol') result[key] = target[key];
       else throw new Error('CAPABILITY_UNAVAILABLE');
     }
@@ -53,7 +67,7 @@ export function textRangeOperations(figma: Api) {
       node = await find((step.target as { nodeId: string }).nodeId);
       if (node.type !== 'TEXT') throw new Error('INVALID_ARGUMENT');
       validate(step);
-      const state = current(); snapshot = state.signature;
+      const state = current(); checkLinks(step, state.segments); snapshot = state.signature;
       const needed = [...state.fonts];
       const newFont = step.op === 'formatTextRange' ? (step.format as any).fontName : (step.insertionFormatting as any).format?.fontName;
       if (newFont && !needed.some(font => font.family === newFont.family && font.style === newFont.style)) needed.push(newFont);
@@ -71,7 +85,9 @@ export function textRangeOperations(figma: Api) {
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
       validate(step);
-      if (current().signature !== snapshot) throw new Error('CONFLICT');
+      const state = current();
+      if (state.signature !== snapshot) throw new Error('CONFLICT');
+      checkLinks(step, state.segments);
       const changed = () => record({ nodeIds: [node.id], resourceIds: [] });
       const start = step.start as number, end = step.end as number;
       if (step.op === 'replaceTextRange') {

@@ -62,6 +62,10 @@ const layout = obj({ layoutMode: z.enum(['NONE', 'HORIZONTAL', 'VERTICAL']).opti
   itemSpacing: n.optional(), counterAxisSpacing: n.nonnegative().optional(),
   primaryAxisAlignItems: z.enum(['MIN', 'MAX', 'CENTER', 'SPACE_BETWEEN']).optional(), counterAxisAlignItems: z.enum(['MIN', 'MAX', 'CENTER', 'BASELINE']).optional(),
 });
+const readLayout = layout.extend({ layoutMode: z.enum(['NONE', 'HORIZONTAL', 'VERTICAL', 'GRID']).optional(),
+  counterAxisSpacing: n.nullable().optional(), primaryAxisAlignItems: z.enum(['MIN', 'MAX', 'CENTER', 'SPACE_BETWEEN', 'SPACE_EVENLY', 'SPACE_AROUND']).optional() });
+const constraints = obj({ horizontal: z.enum(['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE']), vertical: z.enum(['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE']) });
+const layoutSizing = z.enum(['FIXED', 'HUG', 'FILL']);
 const common = { name: z.string().optional(), x: n.optional(), y: n.optional(), width: positive.optional(), height: positive.optional(), rotation: n.optional(), visible: z.boolean().optional(), locked: z.boolean().optional() };
 const nodeTypes = ['FRAME', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT'] as const;
 const properties = (type: typeof nodeTypes[number]) => obj({ ...common,
@@ -74,20 +78,6 @@ const properties = (type: typeof nodeTypes[number]) => obj({ ...common,
   ...(type === 'FRAME' ? { layout: layout.optional() } : {}),
   ...(type === 'POLYGON' || type === 'STAR' ? { pointCount: z.number().int().min(3).optional() } : {}),
 });
-const expectedFields = { name: z.string().optional(), parentId: id.optional(), children: strings.optional(), characters: z.string().optional(),
-  ...common, ...appearanceFields, ...typographyFields, ...componentFields, fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(), textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
-  boundVariables: z.record(id, obj({ type: z.literal('VARIABLE_ALIAS'), id })).optional(),
-  description: z.string().optional(), hiddenFromPublishing: z.boolean().optional(),
-  type: z.enum(['PAINT', 'TEXT', 'EFFECT', 'GRID', 'BOOLEAN', 'STRING', 'FLOAT', 'COLOR']).optional(),
-  paints: z.array(paint).optional(), layoutGrids: z.array(obj({ pattern: z.literal('GRID'), sectionSize: positive, color, visible: z.boolean().optional() })).optional(),
-  modes: z.array(obj({ modeId: id, name: z.string() })).optional(),
-  valuesByMode: z.record(id, z.union([z.string(), z.boolean(), n, color, obj({ type: z.literal('VARIABLE_ALIAS'), id })])).optional(),
-  variableIds: strings.optional(), explicitVariableModes: z.record(id, id).optional(),
-};
-const relatedExpected = obj(expectedFields).refine(value => Object.keys(value).length > 0, 'expected must not be empty');
-const expected = obj({ ...expectedFields, related: z.record(id, relatedExpected).optional() }).refine(value => Object.keys(value).length > 0 && (Object.keys(value).some(key => key !== 'related') || Object.keys(value.related ?? {}).length > 0), 'expected must not be empty');
-const base = { stepId: id, expected: expected.optional() };
-const step = (op: string, fields: Record<string, z.ZodType>) => obj({ ...base, op: z.literal(op), ...fields });
 const target = { target: node }, parent = { parent: node };
 const styleType = z.enum(['PAINT', 'TEXT', 'EFFECT', 'GRID']);
 const styleProperty = z.enum(['fills', 'strokes', 'text', 'effects', 'layoutGrids']);
@@ -119,7 +109,21 @@ const readEffect = z.union([
 ]);
 const readFont = font.extend({ variationSettings: z.record(z.string().regex(/^[\x20-\x7e]{4}$/), n).optional() });
 const readTypographyFields = { ...typographyFields, fontName: readFont.optional() };
-const textSegment = obj({ start: index, end: index, characters: z.string(), ...readTypographyFields, fills: z.array(readPaint).optional(), textStyleId: z.string().optional(), boundVariables: readBindings.optional() }).refine(v => v.end >= v.start);
+const textSegment = obj({ start: index, end: index, characters: z.string(), ...readTypographyFields, fills: z.array(readPaint).optional(), textStyleId: z.string().optional(), fillStyleId: z.string().optional(), boundVariables: readBindings.optional() }).refine(v => v.end >= v.start);
+const expectedFields = { name: z.string().optional(), parentId: id.optional(), children: strings.optional(), characters: z.string().optional(), textSegments: z.array(textSegment).optional(),
+  ...common, ...appearanceFields, ...readTypographyFields, ...componentFields, layout: readLayout.optional(), constraints: constraints.optional(), layoutSizingHorizontal: layoutSizing.optional(), layoutSizingVertical: layoutSizing.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(), textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
+  boundVariables: readBindings.optional(),
+  description: z.string().optional(), hiddenFromPublishing: z.boolean().optional(),
+  type: z.enum(['PAINT', 'TEXT', 'EFFECT', 'GRID', 'BOOLEAN', 'STRING', 'FLOAT', 'COLOR']).optional(),
+  paints: z.array(paint).optional(), layoutGrids: z.array(obj({ pattern: z.literal('GRID'), sectionSize: positive, color, visible: z.boolean().optional() })).optional(),
+  modes: z.array(obj({ modeId: id, name: z.string() })).optional(),
+  valuesByMode: z.record(id, z.union([z.string(), z.boolean(), n, color, obj({ type: z.literal('VARIABLE_ALIAS'), id })])).optional(),
+  variableIds: strings.optional(), explicitVariableModes: z.record(id, id).optional(),
+};
+const relatedExpected = obj(expectedFields).refine(value => Object.keys(value).length > 0, 'expected must not be empty');
+const expected = obj({ ...expectedFields, related: z.record(id, relatedExpected).optional() }).refine(value => Object.keys(value).length > 0 && (Object.keys(value).some(key => key !== 'related') || Object.keys(value.related ?? {}).length > 0), 'expected must not be empty');
+const base = { stepId: id, expected: expected.optional() };
+const step = (op: string, fields: Record<string, z.ZodType>) => obj({ ...base, op: z.literal(op), ...fields });
 const readGrid = z.discriminatedUnion('pattern', [
   obj({ pattern: z.literal('GRID'), sectionSize: n, visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
   obj({ pattern: z.enum(['ROWS', 'COLUMNS']), alignment: z.enum(['MIN', 'MAX', 'STRETCH', 'CENTER']), gutterSize: n, count: n, sectionSize: n.optional(), offset: n.optional(), visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
@@ -142,7 +146,7 @@ const styleMatches = (type: string, value: unknown) => {
 export const nodeProjectionSchema = obj({ ...common, width: n.nonnegative().optional(), height: n.nonnegative().optional(), ...appearanceFields, ...readTypographyFields, ...componentFields,
   fills: z.array(readPaint).optional(), strokes: z.array(readPaint).optional(), effects: z.array(readEffect).optional(), textSegments: z.array(textSegment).optional(),
   characters: z.string().optional(), parentId: id.nullable().optional(), children: strings.optional(),
-  layout: layout.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(),
+  layout: readLayout.optional(), constraints: constraints.optional(), layoutSizingHorizontal: layoutSizing.optional(), layoutSizingVertical: layoutSizing.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(),
   textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
   boundVariables: readBindings.optional(), explicitVariableModes: z.record(id, id).optional(),
 });

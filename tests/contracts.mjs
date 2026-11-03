@@ -26,6 +26,7 @@ for (const [kind, field] of [['components', 'remote'], ['styles', 'value'], ['co
 assert.equal(toolInputs.figma_get_local_resources.safeParse({ scope, kind: 'variables', fields: ['modes'], limit: 10 }).success, false);
 assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['fills.0.color'] }).success, false);
 assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['textSegments'] }).success, true);
+assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['layout', 'constraints', 'layoutSizingHorizontal', 'layoutSizingVertical'] }).success, true);
 const valid = [
   create,
   { stepId: 'style', op: 'createStyle', type: 'PAINT', name: 'Red', value: { paints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }] } },
@@ -67,6 +68,8 @@ assert.equal(stepSchema.safeParse({ ...valid[6], expected: { valuesByMode: { m: 
 assert.equal(stepSchema.safeParse({ ...valid[7], expected: { modes: [{ modeId: 'm', name: 'Light', extra: true }] } }).success, false);
 assert.equal(stepSchema.safeParse({ ...valid[5], expected: { parentId: 'p', related: { p: { children: ['1:1'] } } } }).success, true);
 assert.equal(stepSchema.safeParse({ ...valid[5], expected: { related: { p: {} } } }).success, false);
+assert.equal(stepSchema.safeParse({ stepId: 'text', op: 'setText', target: { nodeId: 't' }, characters: 'new', expected: { textSegments: [{ start: 0, end: 1, characters: 'a', textStyleId: 's', fillStyleId: 'p', boundVariables: { fontSize: { type: 'VARIABLE_ALIAS', id: 'v' } } }] } }).success, true);
+assert.equal(stepSchema.safeParse({ ...valid[10], expected: { layout: { layoutMode: 'HORIZONTAL', counterAxisSpacing: null }, constraints: { horizontal: 'MIN', vertical: 'MAX' }, layoutSizingHorizontal: 'FIXED' } }).success, true);
 for (const type of ['LINE', 'TEXT']) assert.equal(stepSchema.safeParse({ ...create, type, properties: { cornerRadius: 4 } }).success, false, type);
 for (const type of ['ELLIPSE', 'POLYGON', 'STAR', 'TEXT', 'LINE']) assert.equal(stepSchema.safeParse({ ...create, type, properties: { topLeftRadius: 4 } }).success, false, type);
 for (const type of ['FRAME', 'RECTANGLE']) assert.equal(stepSchema.safeParse({ ...create, type, properties: { topLeftRadius: 4 } }).success, true, type);

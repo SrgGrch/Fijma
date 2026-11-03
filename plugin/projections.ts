@@ -4,7 +4,7 @@ type ObjectLike = Record<string, any>;
 type Kind = 'components' | 'styles' | 'collections' | 'variables';
 const layoutFields = ['layoutMode', 'layoutWrap', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'itemSpacing', 'counterAxisSpacing', 'primaryAxisAlignItems', 'counterAxisAlignItems'];
-const textFields = ['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'fills', 'textStyleId', 'boundVariables'];
+const textFields = ['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables'];
 
 function valueFor(source: ObjectLike, field: string, kind?: Kind): unknown {
   if (field === 'parentId') return source.parent?.id ?? null;

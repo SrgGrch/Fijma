@@ -3,10 +3,10 @@ import { build } from 'esbuild';
 const built = await build({ entryPoints: ['plugin/projections.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { projectNode, projectResource, readNodes } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
 const mixed = Symbol('mixed');
-const segments = [{ start: 0, end: 2, characters: 'Hi', fontName: { family: 'Inter', style: 'Regular' }, boundVariables: { fontSize: { type: 'VARIABLE_ALIAS', id: 'v' } } }];
+const segments = [{ start: 0, end: 2, characters: 'Hi', fontName: { family: 'Inter', style: 'Regular' }, textStyleId: 'text-style', fillStyleId: 'fill-style', boundVariables: { fontSize: { type: 'VARIABLE_ALIAS', id: 'v' } } }];
 const node = { id: '1:1', type: 'TEXT', name: 'Text', visible: false, locked: true, fontName: mixed,
   parent: { id: '0:1' }, fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, blendMode: 'NORMAL', boundVariables: { color: { type: 'VARIABLE_ALIAS', id: 'v' } } }],
-  boundVariables: { fontSize: [{ type: 'VARIABLE_ALIAS', id: 'v' }] }, getStyledTextSegments: () => segments };
+  boundVariables: { fontSize: [{ type: 'VARIABLE_ALIAS', id: 'v' }] }, getStyledTextSegments: fields => { assert(fields.includes('fillStyleId')); return segments; } };
 const projection = projectNode(node, ['name', 'visible', 'locked', 'fontName', 'parentId', 'fills', 'boundVariables', 'textSegments', 'width'], mixed);
 assert.deepEqual(projection.mixed, ['fontName']);
 assert.deepEqual(projection.unavailable, ['width']);
@@ -16,6 +16,10 @@ assert.equal(projection.properties.parentId, '0:1');
 assert.deepEqual(projection.properties.fills, node.fills);
 assert.deepEqual(projection.properties.boundVariables, node.boundVariables);
 assert.deepEqual(projection.properties.textSegments, segments);
+const layoutNode = { id: 'frame', type: 'FRAME', layoutMode: 'HORIZONTAL', layoutWrap: 'NO_WRAP', counterAxisSpacing: null,
+  constraints: { horizontal: 'MIN', vertical: 'MAX' }, layoutSizingHorizontal: 'FIXED', layoutSizingVertical: 'HUG' };
+assert.deepEqual(projectNode(layoutNode, ['layout', 'constraints', 'layoutSizingHorizontal', 'layoutSizingVertical'], mixed).properties,
+  { layout: { layoutMode: 'HORIZONTAL', layoutWrap: 'NO_WRAP', counterAxisSpacing: null }, constraints: layoutNode.constraints, layoutSizingHorizontal: 'FIXED', layoutSizingVertical: 'HUG' });
 const unsupported = projectNode({ id: '2:1', type: 'RECTANGLE', fills: [{ type: 'SHADER', id: 'shader' }] }, ['fills', 'characters'], mixed);
 assert.deepEqual(unsupported.unavailable, ['fills', 'characters']);
 assert.deepEqual(unsupported.properties, {});
