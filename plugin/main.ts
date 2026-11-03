@@ -4,14 +4,18 @@ import { contextRequestSchema } from '../shared/context';
 import { TreePager, SearchPager } from '../shared/tree-pager';
 import { loadDocumentRoot } from './document';
 import { createUIYield } from '../shared/ui-yield';
+import { readNodes } from './projections';
+import { ResourcePager } from './resources';
 
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes'];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources'];
 const scheduler = createUIYield(message => figma.ui.postMessage(message));
 let pager = new TreePager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
 let search = new SearchPager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
+let limits = bootstrapLimits;
+let resources = new ResourcePager(limits);
 const revisions = new Map<string, { value: number }>();
 let documentRevision = 0;
 function observe(page: PageNode) {
@@ -31,7 +35,7 @@ figma.ui.onmessage = async message => {
   if (message.type === 'hello-request' && Object.keys(message).length === 1) {
     awaitingWelcome = true;
     connectionGeneration = undefined;
-    pager.clear(); search.clear(); scheduler.release();
+    pager.clear(); search.clear(); resources.clear(); scheduler.release();
     figma.ui.postMessage({ type: 'hello', protocolVersion: PROTOCOL_VERSION, sessionId,
       capabilities, limits: bootstrapLimits, writeEnabled: false });
   } else if (message.type === 'welcome' && awaitingWelcome) {
@@ -47,13 +51,15 @@ figma.ui.onmessage = async message => {
       maxResponseBytes: parsed.data.limits.maxResponseBytes, chunkSize: 50 }, 100, parsed.data.limits.resourceTtl);
     search = new SearchPager({ maxDepth: parsed.data.limits.maxDepth, maxNodes: parsed.data.limits.maxNodes,
       maxResponseBytes: parsed.data.limits.maxResponseBytes, chunkSize: 50 }, 100, parsed.data.limits.resourceTtl);
+    limits = parsed.data.limits;
+    resources = new ResourcePager(limits);
     awaitingWelcome = false;
     figma.ui.postMessage({ type: 'bound', sessionId, connectionGeneration, documentLabel: figma.root.name,
       writeEnabled: false, message: 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
   } else if (message.type === 'disconnected' && Object.keys(message).length === 1) {
     awaitingWelcome = false;
     connectionGeneration = undefined;
-    pager.clear(); search.clear(); scheduler.release();
+    pager.clear(); search.clear(); resources.clear(); scheduler.release();
   } else if (message.type === 'getContext') {
     const request = contextRequestSchema.safeParse(message);
     if (!request.success || request.data.sessionId !== sessionId || request.data.connectionGeneration !== connectionGeneration) {
@@ -68,13 +74,30 @@ figma.ui.onmessage = async message => {
     try {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes'].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources'].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
       if (reading) throw new Error('RESOURCE_LIMIT');
     } catch { figma.ui.postMessage({ type: 'error', code: 'INVALID_ARGUMENT' }); return; }
     reading = true;
     const scope = { sessionId, connectionGeneration };
-    const reply = { type: command.command === 'getTree' ? 'treeResult' : 'searchResult', ...scope, operationId: command.operationId };
+    const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult' };
+    const reply = { type: replyType[command.command as keyof typeof replyType], ...scope, operationId: command.operationId };
     try {
+      if (command.command === 'getNodes') {
+        const query = command.params as { nodeIds: string[]; fields: string[] };
+        const data = await readNodes(figma, query.nodeIds, query.fields, limits.maxNodes, limits.maxResponseBytes, scheduler.wait);
+        if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED');
+        figma.ui.postMessage({ ...reply, data });
+        return;
+      }
+      if (command.command === 'getLocalResources') {
+        const query = command.params as { kind: 'components' | 'styles' | 'collections' | 'variables'; ids?: string[]; fields: string[]; limit: number; cursor?: string };
+        const revision = () => JSON.stringify([documentRevision, figma.root.children.map(page => [page.id, page.name])]);
+        const data = await resources.read(figma, query, scope, Date.now(), revision,
+          async page => { await page.loadAsync(); observe(page); }, scheduler.wait);
+        if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED');
+        figma.ui.postMessage({ ...reply, data });
+        return;
+      }
       if (command.command === 'findNodes') {
         const query = command.params as { rootId?: string; document?: true; name?: string; types?: string[]; limit: number; cursor?: string };
         search.checkCursor(query, scope, Date.now());
@@ -102,7 +125,7 @@ figma.ui.onmessage = async message => {
       figma.ui.postMessage({ ...reply, data });
     } catch (error) {
       const code = error instanceof Error && ['SESSION_EXPIRED', 'NODE_NOT_FOUND', 'INVALID_CURSOR', 'INVALID_ARGUMENT', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
-      figma.ui.postMessage({ ...reply, error: { code, message: 'Не удалось прочитать дерево.', recoveryAction: 'Перечитайте контекст и начните чтение заново.' } });
+      figma.ui.postMessage({ ...reply, error: { code, message: 'Не удалось прочитать документ.', recoveryAction: 'Перечитайте контекст и начните чтение заново.' } });
     } finally { reading = false; }
   }
 };

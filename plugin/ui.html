@@ -63,7 +63,7 @@ onmessage = event => {
     sendMain({ type: 'yield', id: message.id }); return;
   }
   if (!message || !socket || socket.readyState !== WebSocket.OPEN) return;
-  if (message.type === 'hello' || message.type === 'context' || message.type === 'treeResult' || message.type === 'searchResult') socket.send(JSON.stringify(message));
+  if (['hello', 'context', 'treeResult', 'searchResult', 'nodesResult', 'resourcesResult'].includes(message.type)) socket.send(JSON.stringify(message));
   else if (message.type === 'bound') {
     status.textContent = message.message;
     document.getElementById('document').textContent = 'Документ: ' + message.documentLabel;

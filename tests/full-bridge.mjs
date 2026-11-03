@@ -21,10 +21,15 @@ try {
   const html = await readFile('plugin/ui.html', 'utf8');
   const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
   let invalidate;
-  const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [{ id: '1:1', name: 'Target', type: 'TEXT' }], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };
+  const textNode = { id: '1:1', name: 'Target', type: 'TEXT', visible: false, locked: true };
+  const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [textNode], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };
+  textNode.parent = page;
   let ui, resolveBound;
   const bound = new Promise(resolve => resolveBound = resolve);
-  const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, showUI() {}, ui: {
+  const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, mixed: Symbol('mixed'),
+    getNodeByIdAsync: async id => id === textNode.id ? textNode : null,
+    variables: { getLocalVariablesAsync: async () => [{ id: 'v1', name: 'Color', resolvedType: 'COLOR', variableCollectionId: 'c', valuesByMode: { m: { type: 'VARIABLE_ALIAS', id: 'v2' } } }] },
+    showUI() {}, ui: {
     postMessage(message) { queueMicrotask(() => {
       ui.onmessage({ data: { pluginMessage: message } });
       if (message.type === 'bound') resolveBound(message);
@@ -54,6 +59,13 @@ try {
   const found = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, name: 'Target', types: ['TEXT'], limit: 10 } });
   assert.equal(found.structuredContent.nodes[0].nodeId, '1:1');
   assert.equal(found.structuredContent.nodes[0].pageId, '0:1');
+  const nodes = await client.callTool({ name: 'figma_get_nodes', arguments: { scope, nodeIds: ['1:1', 'missing'], fields: ['name', 'visible', 'locked', 'fontName'] } });
+  assert.equal(nodes.structuredContent.nodes[0].properties.visible, false);
+  assert.equal(nodes.structuredContent.nodes[0].properties.locked, true);
+  assert.deepEqual(nodes.structuredContent.nodes[0].unavailable, ['fontName']);
+  assert.equal(nodes.structuredContent.nodes[1].error.code, 'NODE_NOT_FOUND');
+  const variables = await client.callTool({ name: 'figma_get_local_resources', arguments: { scope, kind: 'variables', fields: ['name', 'type', 'valuesByMode'], limit: 10 } });
+  assert.equal(variables.structuredContent.resources[0].properties.valuesByMode.m.id, 'v2');
   const firstSearch = await client.callTool({ name: 'figma_find_nodes', arguments: { scope, document: true, limit: 1 } });
   assert.ok(firstSearch.structuredContent.nextCursor);
   invalidate();

@@ -25,7 +25,8 @@ const descriptions: Record<keyof typeof toolInputs, string> = {
   figma_export_node: 'Экспорт выбранного узла в PNG или SVG.',
 };
 
-export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>) {
+export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>,
+  getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>) {
   const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' });
   for (const [name, inputSchema] of Object.entries(toolInputs)) {
     server.registerTool(name, {
@@ -37,6 +38,8 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         if (name === 'figma_get_context') output = contextSchema.parse(await getContext());
         else if (name === 'figma_get_tree' && getTree) output = treeOutputSchema.parse(await getTree(args));
         else if (name === 'figma_find_nodes' && findNodes) output = searchOutputSchema.parse(await findNodes(args));
+        else if (name === 'figma_get_nodes' && getNodes) output = nodesOutputSchema.parse(await getNodes(args));
+        else if (name === 'figma_get_local_resources' && getLocalResources) output = resourcesOutputSchema.parse(await getLocalResources(args));
         else {
           const context = contextSchema.parse(await getContext());
           output = { error: { code: context.state === 'ready' ? 'CAPABILITY_UNAVAILABLE' : 'NOT_CONNECTED',

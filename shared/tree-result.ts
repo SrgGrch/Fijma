@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { scopeSchema, operationIdSchema, errorSchema } from './contracts';
+import { nodesOutputSchema, resourcesOutputSchema } from './operation-result';
 
 export const treeDataSchema = z.strictObject({
   nodes: z.array(z.strictObject({ nodeId: z.string(), name: z.string(), type: z.string(), depth: z.number().int().nonnegative() })),
@@ -22,3 +23,10 @@ export const searchReplySchema = z.strictObject({ type: z.literal('searchResult'
 export const searchOutputSchema = z.strictObject({
   nodes: searchDataSchema.shape.nodes.optional(), truncated: z.boolean().optional(), nextCursor: z.string().optional(), error: errorSchema.optional(),
 }).refine(value => value.error ? value.nodes === undefined : value.nodes !== undefined && value.truncated !== undefined);
+
+export const nodesReplySchema = z.strictObject({ type: z.literal('nodesResult'), ...scopeSchema.shape,
+  operationId: operationIdSchema, data: nodesOutputSchema.optional(), error: errorSchema.optional(),
+}).refine(value => Boolean(value.data) !== Boolean(value.error));
+export const resourcesReplySchema = z.strictObject({ type: z.literal('resourcesResult'), ...scopeSchema.shape,
+  operationId: operationIdSchema, data: resourcesOutputSchema.optional(), error: errorSchema.optional(),
+}).refine(value => Boolean(value.data) !== Boolean(value.error));
