@@ -5,6 +5,11 @@ const { negotiateHello, validateCommand, validateAck } = await import(`data:text
 const limits = Object.fromEntries(['maxMessageBytes', 'maxBatchSteps', 'maxQueuedOperations', 'maxDepth', 'maxNodes', 'maxResponseBytes', 'maxImportBytes', 'maxExportPixels', 'maxExportBytes', 'operationTimeout', 'dedupTtl', 'maxJournalEntries', 'resourceTtl', 'clockSkew'].map(key => [key, 10]));
 const hello = { type: 'hello', protocolVersion: 1, sessionId: 'session', capabilities: [], limits, writeEnabled: false };
 assert.equal(negotiateHello(hello, 1).type, 'welcome');
+const claimedWrite = { ...hello, writeEnabled: true, capabilities: ['getContext', 'applyBatch'] };
+assert.equal(negotiateHello(claimedWrite, 1).writeEnabled, false);
+assert.deepEqual(negotiateHello(claimedWrite, 1).capabilities, ['getContext']);
+assert.equal(negotiateHello(claimedWrite, 1, true).writeEnabled, true);
+assert.throws(() => negotiateHello(hello, 1, true), /PROTOCOL_MISMATCH/);
 assert.throws(() => negotiateHello({ ...hello, protocolVersion: 2 }, 1), /PROTOCOL_MISMATCH/);
 assert.throws(() => negotiateHello({ ...hello, secret: 'not allowed' }, 1));
 const scope = { sessionId: 'session', connectionGeneration: 1 };

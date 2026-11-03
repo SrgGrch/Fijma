@@ -1,2 +1,4 @@
 node_modules/
 dist/
+/experiments/diagnostics/main.js
+/experiments/diagnostics/ui.html

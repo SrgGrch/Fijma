@@ -25,12 +25,13 @@ const commandSchema = z.strictObject({ type: z.literal('command'), ...scopeSchem
   operationId: operationIdSchema, command: z.enum(Object.keys(commandTools) as [string, ...string[]]), params: z.record(z.string(), z.json()) });
 export const ackSchema = z.strictObject({ type: z.literal('ack'), ...scopeSchema.shape, operationId: operationIdSchema });
 
-export function negotiateHello(raw: unknown, generation: number) {
+export function negotiateHello(raw: unknown, generation: number, diagnostic = false) {
   const hello = helloSchema.parse(raw);
   if (hello.protocolVersion !== PROTOCOL_VERSION) throw new Error('PROTOCOL_MISMATCH');
+  if (diagnostic && (!hello.writeEnabled || !hello.capabilities.includes('applyBatch'))) throw new Error('PROTOCOL_MISMATCH');
   const limits = Object.fromEntries(Object.entries(hello.limits).map(([key, value]) => [key, Math.min(value, bootstrapLimits[key as keyof typeof bootstrapLimits])]));
-  return welcomeSchema.parse({ ...hello, type: 'welcome', connectionGeneration: generation, limits, writeEnabled: false,
-    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'].includes(value)) });
+  return welcomeSchema.parse({ ...hello, type: 'welcome', connectionGeneration: generation, limits, writeEnabled: diagnostic,
+    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', ...(diagnostic ? ['applyBatch'] : [])].includes(value)) });
 }
 
 export function validateCommand(raw: unknown, scope: z.infer<typeof scopeSchema>) {

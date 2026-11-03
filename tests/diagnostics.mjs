@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 const html = await readFile('experiments/diagnostics/ui.html', 'utf8');
 for (const manual of [false, true]) {
-  const elements = Object.fromEntries(['run', 'stop', 'status', 'report'].map(id => [id, {}]));
+  const elements = Object.fromEntries(['run', 'stop', 'status', 'report', 'bridge-status', 'bridge-report', 'secret', 'connect', 'disconnect', 'bridge-document', 'snapshot', 'positive', 'replay'].map(id => [id, {}]));
   const sent = [], timers = new Map();
   let timerId = 0;
   const ui = {

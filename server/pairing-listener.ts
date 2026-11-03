@@ -5,10 +5,14 @@ import { negotiateHello } from '../shared/protocol';
 import { contextReplySchema, disconnectedContext, contextSchema } from '../shared/context';
 import { treeReplySchema, searchReplySchema, nodesReplySchema, resourcesReplySchema, navigateReplySchema } from '../shared/tree-result';
 import { toolInputs } from '../shared/contracts';
+import { diagnosticControlSchema, operationReplySchema } from '../shared/ui-messages';
 
 const pairSchema = z.strictObject({ type: z.literal('pair'), secret: z.string().length(64).regex(/^[0-9a-f]+$/) });
 
-export async function createPairingListener(secret: string, port: number) {
+export async function createPairingListener(secret: string, port: number, diagnostic?: {
+  onControl: (socket: WebSocket, control: { action: 'positive' | 'replay' | 'snapshot' }, binding: ReturnType<typeof negotiateHello>) => void;
+  onResult: (socket: WebSocket, reply: ReturnType<typeof operationReplySchema.parse>, binding: ReturnType<typeof negotiateHello>) => void;
+}) {
   const expected = Buffer.from(secret);
   if (expected.length !== 64) throw new Error('INVALID_ARGUMENT');
   const unauthenticated = new Set<WebSocket>();
@@ -49,25 +53,36 @@ export async function createPairingListener(secret: string, port: number) {
         clearTimeout(helloTimer);
         try {
           if (binary) throw new Error('PROTOCOL_MISMATCH');
-          const welcome = negotiateHello(JSON.parse(data.toString()), currentGeneration);
+          const welcome = negotiateHello(JSON.parse(data.toString()), currentGeneration, Boolean(diagnostic));
           binding = welcome;
           socket.send(JSON.stringify(welcome));
           socket.on('message', (bytes, binary) => {
             try {
               if (binary) throw new Error('PROTOCOL_MISMATCH');
+              const message = JSON.parse(bytes.toString());
+              if (diagnostic && binding && message?.type === 'diagControl') {
+                diagnostic.onControl(socket, diagnosticControlSchema.parse(message), binding);
+                return;
+              }
+              if (diagnostic && binding && message?.type === 'operationResult') {
+                const reply = operationReplySchema.parse(message);
+                if (reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
+                diagnostic.onResult(socket, reply, binding);
+                return;
+              }
               if (pending && pending.kind !== 'context') {
                 const schemas = { tree: treeReplySchema, search: searchReplySchema, nodes: nodesReplySchema, resources: resourcesReplySchema, navigate: navigateReplySchema };
-                const reply = schemas[pending.kind].parse(JSON.parse(bytes.toString()));
+                const reply = schemas[pending.kind].parse(message);
                 if (!binding || reply.operationId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const current = pending; pending = undefined; clearTimeout(current.timer);
                 current.resolve(reply.error ? { error: reply.error } : reply.data);
                 return;
               }
-              const reply = contextReplySchema.parse(JSON.parse(bytes.toString()));
+              const reply = contextReplySchema.parse(message);
               if (!binding || !pending || reply.requestId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
               const current = pending; pending = undefined; clearTimeout(current.timer);
               current.resolve(contextSchema.parse({ ...reply.document, state: 'ready', sessionId: binding.sessionId,
-                connectionGeneration: binding.connectionGeneration, writeEnabled: false, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'].includes(item)), limits: binding.limits }));
+                connectionGeneration: binding.connectionGeneration, writeEnabled: binding.writeEnabled, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', ...(diagnostic ? ['applyBatch'] : [])].includes(item)), limits: binding.limits }));
             } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
           });
         } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }

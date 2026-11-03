@@ -64,6 +64,7 @@ for (const bad of [
   { type: 'navigateResult', sessionId: 's', connectionGeneration: 1, operationId, data: { currentPageId: '0:1', selection: [], extra: true } },
   { type: 'navigateResult', sessionId: 'other', connectionGeneration: 1, operationId, data: { currentPageId: '0:1', selection: [] } },
   { type: 'ack', sessionId: 's', connectionGeneration: 1, operationId, status: 'succeeded' },
+  { type: 'operationResult', sessionId: 's', connectionGeneration: 1, operationId, data: { sessionId: 's', connectionGeneration: 1, operationId, status: 'succeeded', steps: [], affectedNodeIds: [], affectedResourceIds: [], warnings: [] } },
 ]) {
   const h = ready(), before = h.socket.sent.length; h.main(bad);
   assert.equal(h.socket.readyState, 3); assert.equal(h.socket.sent.length, before);

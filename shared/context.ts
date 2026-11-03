@@ -9,7 +9,7 @@ export const contextSchema = z.strictObject({
   state: z.enum(['disconnected', 'ready']), sessionId: z.string().nullable(), connectionGeneration: z.number().int().positive().nullable(),
   documentLabel: z.string().nullable(), currentPageId: z.string().nullable(),
   pages: z.array(z.strictObject({ id: z.string().min(1), name: z.string() })), selection: z.array(z.string()),
-  writeEnabled: z.literal(false), capabilities: z.array(z.string()), limits: limitsSchema.nullable(),
+  writeEnabled: z.boolean(), capabilities: z.array(z.string()), limits: limitsSchema.nullable(),
 });
 export const disconnectedContext = {
   state: 'disconnected' as const, sessionId: null, connectionGeneration: null, documentLabel: null,
