@@ -41,6 +41,13 @@ const valid = [
   { stepId: 'range', op: 'replaceTextRange', target: { nodeId: '1:2' }, start: 0, end: 2, text: 'Hi', insertionFormatting: { inherit: 'AFTER' }, expected: { characters: 'Hello' } },
 ];
 for (const value of valid) assert.equal(stepSchema.safeParse(value).success, true, value.op);
+const range = valid.at(-1);
+const fullRangeStyle = { fontName: { family: 'Inter', style: 'Regular' }, fontSize: 16, lineHeight: { unit: 'AUTO' }, letterSpacing: { unit: 'PIXELS', value: 0 }, textCase: 'ORIGINAL', textDecoration: 'NONE', fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }] };
+assert.equal(stepSchema.safeParse({ ...range, insertionFormatting: { format: fullRangeStyle } }).success, true);
+assert.equal(stepSchema.safeParse({ ...range, insertionFormatting: { inherit: 'BEFORE', format: { fontSize: 18 } } }).success, true);
+assert.equal(stepSchema.safeParse({ ...range, insertionFormatting: { format: { fontSize: 18 } } }).success, false);
+assert.equal(stepSchema.safeParse({ ...range, insertionFormatting: { format: { ...fullRangeStyle, fills: undefined } } }).success, false);
+assert.equal(stepSchema.safeParse({ stepId: 'format', op: 'formatTextRange', target: range.target, start: 0, end: 1, format: { textAlignHorizontal: 'CENTER' }, expected: range.expected }).success, false);
 for (const value of [
   { ...create, properties: { vectorNetwork: {} } },
   { ...create, type: 'INSTANCE' }, { ...create, properties: { width: Infinity } },

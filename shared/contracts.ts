@@ -50,6 +50,12 @@ const typographyFields = {
   textAutoResize: z.enum(['NONE', 'WIDTH_AND_HEIGHT', 'HEIGHT', 'TRUNCATE']).optional(),
 };
 const typography = obj(typographyFields);
+const rangeStyle = obj({
+  fontName: font, fontSize: positive, lineHeight: typographyFields.lineHeight.unwrap(),
+  letterSpacing: typographyFields.letterSpacing.unwrap(), textCase: typographyFields.textCase.unwrap(),
+  textDecoration: typographyFields.textDecoration.unwrap(), fills: z.array(paint),
+});
+const rangePatch = rangeStyle.partial();
 const appearance = obj(appearanceFields);
 const layout = obj({ layoutMode: z.enum(['NONE', 'HORIZONTAL', 'VERTICAL']).optional(), layoutWrap: z.enum(['NO_WRAP', 'WRAP']).optional(),
   paddingTop: n.nonnegative().optional(), paddingRight: n.nonnegative().optional(), paddingBottom: n.nonnegative().optional(), paddingLeft: n.nonnegative().optional(),
@@ -162,8 +168,8 @@ const operations = [
   step('setConstraints', { ...target, value: obj({ horizontal: z.enum(['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE']), vertical: z.enum(['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE']) }) }),
   step('setAutoLayout', { ...target, layout }), step('setLayoutSizing', { ...target, sizing: obj({ horizontal: z.enum(['FIXED', 'HUG', 'FILL']), vertical: z.enum(['FIXED', 'HUG', 'FILL']) }) }),
   step('createText', { ...parent, characters: z.string(), font, typography }), step('setText', { ...target, characters: z.string() }),
-  step('replaceTextRange', { ...target, start: index, end: index, text: z.string(), insertionFormatting: z.union([obj({ inherit: z.enum(['BEFORE', 'AFTER']) }), obj({ format: typography })]) }),
-  step('formatTextRange', { ...target, start: index, end: index, format: obj({ ...typographyFields, fills: z.array(paint).optional() }) }),
+  step('replaceTextRange', { ...target, start: index, end: index, text: z.string(), insertionFormatting: z.union([obj({ inherit: z.enum(['BEFORE', 'AFTER']), format: rangePatch.optional() }), obj({ format: rangeStyle })]) }),
+  step('formatTextRange', { ...target, start: index, end: index, format: rangePatch }),
   step('setAppearance', { ...target, appearance }), step('importImage', { data: id, mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']), ...parent, placement: obj({ x: n, y: n, width: positive, height: positive }) }),
   step('importSvg', { svg: id, ...parent }), step('booleanNodes', { kind: z.enum(['union', 'subtract', 'intersect', 'exclude']), targets: z.array(node).min(2), ...parent }),
   step('createComponent', { ...parent, properties: properties('FRAME') }), step('componentFromNode', target), step('combineVariants', { targets: z.array(node).min(2), ...parent }),
