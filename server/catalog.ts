@@ -27,7 +27,8 @@ const descriptions: Record<keyof typeof toolInputs, string> = {
 
 export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>,
   getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>, navigate?: (args: unknown) => Promise<unknown>,
-  exportNode?: (args: unknown) => Promise<unknown>, readResource?: (uri: string) => { uri: string; mimeType: string; data: Buffer }) {
+  exportNode?: (args: unknown) => Promise<unknown>, readResource?: (uri: string) => { uri: string; mimeType: string; data: Buffer },
+  applyBatch?: (args: unknown) => Promise<unknown>, getOperation?: (args: unknown) => Promise<unknown>, cancelOperation?: (args: unknown) => Promise<unknown>) {
   const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' });
   if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
     { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
@@ -50,6 +51,9 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         else if (name === 'figma_get_local_resources' && getLocalResources) output = resourcesOutputSchema.parse(await getLocalResources(args));
         else if (name === 'figma_navigate' && navigate) output = navigateOutputSchema.parse(await navigate(args));
         else if (name === 'figma_export_node' && exportNode) output = exportOutputSchema.parse(await exportNode(args));
+        else if (name === 'figma_apply_batch' && applyBatch) output = operationOutputSchema.parse(await applyBatch(args));
+        else if (name === 'figma_get_operation' && getOperation) output = operationOutputSchema.parse(await getOperation(args));
+        else if (name === 'figma_cancel_operation' && cancelOperation) output = operationOutputSchema.parse(await cancelOperation(args));
         else {
           const context = contextSchema.parse(await getContext());
           output = { error: { code: context.state === 'ready' ? 'CAPABILITY_UNAVAILABLE' : 'NOT_CONNECTED',
@@ -57,7 +61,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
             recoveryAction: 'Проверьте capabilities текущего контекста.' } };
         }
       } catch (error) {
-        const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
+        const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
         output = { error: { code, message: 'Запрос документа недоступен.', recoveryAction: 'Переподключите плагин и повторите чтение контекста.' } };
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];

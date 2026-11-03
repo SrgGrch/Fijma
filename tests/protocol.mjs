@@ -7,7 +7,7 @@ const hello = { type: 'hello', protocolVersion: 1, sessionId: 'session', capabil
 assert.equal(negotiateHello(hello, 1).type, 'welcome');
 const claimedWrite = { ...hello, writeEnabled: true, capabilities: ['getContext', 'applyBatch'] };
 assert.equal(negotiateHello(claimedWrite, 1).writeEnabled, false);
-assert.deepEqual(negotiateHello(claimedWrite, 1).capabilities, ['getContext']);
+assert.deepEqual(negotiateHello(claimedWrite, 1).capabilities, ['getContext', 'applyBatch']);
 assert.equal(negotiateHello(claimedWrite, 1, true).writeEnabled, true);
 assert.throws(() => negotiateHello(hello, 1, true), /PROTOCOL_MISMATCH/);
 assert.throws(() => negotiateHello({ ...hello, protocolVersion: 2 }, 1), /PROTOCOL_MISMATCH/);

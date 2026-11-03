@@ -11,7 +11,7 @@ const operationId = '019a4a10-0000-7000-8000-000000000001';
 const hello = { type: 'hello', protocolVersion: 1, sessionId: 's', capabilities: ['getContext', 'getTree', 'navigate'], limits: bootstrapLimits, writeEnabled: false };
 const welcome = { ...hello, type: 'welcome', connectionGeneration: 1 };
 function setup() {
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
   const sentMain = [], sockets = [];
   class Socket {
     static OPEN = 1;
@@ -72,5 +72,21 @@ for (const bad of [
 {
   const h = ready(), before = h.sentMain.length; h.main({ type: 'yield', id: 1, extra: true });
   assert.equal(h.socket.readyState, 3); assert.equal(h.sentMain.length, before + 1); assert.equal(h.sentMain.at(-1).type, 'disconnected');
+}
+{
+  const h = ready();
+  h.elements.write.checked = true; h.elements.write.onchange();
+  assert.equal(h.sentMain.at(-1).type, 'setWriteEnabled');
+  h.main({ type: 'writeState', enabled: false, reason: 'CAPABILITY_UNAVAILABLE' });
+  assert.equal(h.elements.write.checked, false);
+  assert.match(h.elements['write-status'].textContent, /Desktop/);
+  h.elements.stop.onclick(); assert.equal(h.sentMain.at(-1).type, 'stop');
+  h.server(command); assert.match(h.elements.operation.textContent, /navigate/);
+  h.main({ type: 'navigateResult', sessionId: 's', connectionGeneration: 1, operationId, data: { currentPageId: '0:1', selection: [] } });
+  assert.match(h.elements.operation.textContent, /нет/);
+}
+for (const reason of ['SESSION_BUSY', 'AUTH_FAILED', 'PROTOCOL_MISMATCH', 'private payload']) {
+  const h = setup(); h.socket.onclose({ reason });
+  assert.equal(h.elements.status.textContent, reason === 'private payload' ? 'Disconnected.' : reason);
 }
 console.log('UI message validation: phases, version, scope, schema, navigation and ACK OK');

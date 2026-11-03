@@ -9,14 +9,89 @@ import { ResourcePager } from './resources';
 import { navigate } from './navigation';
 import { exportNode } from './export';
 import { chunkSizeFor } from '../shared/export-wire';
+import { BatchExecutor } from '../shared/batch-executor';
+import { OperationJournal } from '../shared/operation-journal';
+import { writeOperations } from './write-operations';
 
-export function createBridgeRuntime(diagnostic?: { run: (command: any, scope: { sessionId: string; connectionGeneration: number }, checkScope: () => void) => Promise<unknown> }) {
+export function createBridgeRuntime(diagnostic?: { run: (command: any, scope: { sessionId: string; connectionGeneration: number }, checkScope: () => void) => Promise<unknown> }, candidate = false) {
 const documentRoot = figma.root;
 const checkDocument = () => { if (figma.root !== documentRoot) throw new Error('DOCUMENT_MISMATCH'); };
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel'] : [])];
+let writeEnabled = false;
+const operations = writeOperations(figma);
+let parentId: string | undefined;
+const executor = new BatchExecutor(new OperationJournal(bootstrapLimits), {
+  ...operations,
+  yieldControl: () => scheduler.wait(),
+  async prepare(step, original) {
+    await operations.prepare(step, original);
+    checkDocument();
+    const reference = (step.target ?? step.pageId ?? step.parent) as { nodeId?: string } | undefined;
+    const node = reference?.nodeId ? await figma.getNodeByIdAsync(reference.nodeId) : null;
+    checkDocument();
+    parentId = step.parent ? (step.parent as { nodeId?: string }).nodeId : node?.parent?.id;
+  },
+  checkScope(scope) { checkDocument(); if (scope.sessionId !== sessionId || scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); if (!writeEnabled) throw new Error('WRITE_DISABLED'); },
+  async verify(step, changes) {
+    const result: unknown[] = [];
+    for (const id of [...new Set(changes.nodeIds)]) {
+      checkDocument();
+      const node = await figma.getNodeByIdAsync(id);
+      checkDocument();
+      if (!node || node.removed) {
+        if (!['deleteNode', 'deletePage'].includes(step.op)) throw new Error('FIGMA_API_ERROR');
+        result.push({ nodeId: id, deleted: true }); continue;
+      }
+      const fields = new Set<string>(['name']);
+      const propertySet = (step.patch ?? step.properties ?? step.typography ?? {}) as Record<string, unknown>;
+      for (const field of Object.keys(propertySet)) fields.add(field);
+      if (['setGeometry', 'setAutoLayout', 'setLayoutSizing', 'setConstraints', 'createNode', 'createText'].includes(step.op)) for (const key of ['x', 'y', 'width', 'height']) fields.add(key);
+      if (step.op === 'setGeometry' && step.rotation !== undefined) fields.add('rotation');
+      if (node.type === 'TEXT') {
+        fields.add('characters');
+        if (node.characters.length) {
+          if (typeof node.getStyledTextSegments !== 'function') throw new Error('FIGMA_API_ERROR');
+          const segments = node.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']);
+          result.push({ nodeId: id, textSegments: JSON.parse(JSON.stringify(segments)) });
+        } else fields.add('fontName');
+      }
+      if (step.op === 'setConstraints') fields.add('constraints');
+      if (step.op === 'setAutoLayout') for (const key of Object.keys(step.layout as object)) fields.add(key);
+      if (step.op === 'setLayoutSizing') for (const key of ['layoutSizingHorizontal', 'layoutSizingVertical']) fields.add(key);
+      const properties: Record<string, unknown> = {};
+      for (const key of fields) {
+        const value = (node as any)[key];
+        if (value === undefined || typeof value === 'symbol') throw new Error('FIGMA_API_ERROR');
+        properties[key] = JSON.parse(JSON.stringify(value));
+      }
+      result.push({ nodeId: id, properties });
+      if (step.op === 'setAutoLayout' && 'children' in node) {
+        for (const child of node.children) {
+          const geometry: Record<string, unknown> = {};
+          for (const field of ['x', 'y', 'width', 'height']) if (field in child) geometry[field] = (child as any)[field];
+          result.push({ nodeId: child.id, properties: geometry });
+        }
+      }
+    }
+    if (parentId && !changes.nodeIds.includes(parentId)) {
+      checkDocument();
+      const parent = await figma.getNodeByIdAsync(parentId);
+      checkDocument();
+      if (!parent || parent.removed) throw new Error('FIGMA_API_ERROR');
+      const properties: Record<string, unknown> = {};
+      for (const field of ['x', 'y', 'width', 'height', 'layoutMode']) if (field in parent) properties[field] = (parent as any)[field];
+      if ('children' in parent) properties.children = parent.children.map(child => child.id);
+      result.push({ nodeId: parentId, properties: JSON.parse(JSON.stringify(properties)) });
+    }
+    if (changes.resourceIds.length || encodeURI(JSON.stringify(result)).replace(/%[A-F\d]{2}/g, 'x').length > Math.floor(limits.maxResponseBytes / limits.maxBatchSteps)) throw new Error('RESOURCE_LIMIT');
+    return result;
+  },
+  commitUndo() { checkDocument(); figma.commitUndo(); },
+}, bootstrapLimits.maxQueuedOperations);
+const snapshot = (operationId: string, scope: { sessionId: string; connectionGeneration: number }, value: any) => value.result ?? { operationId, ...scope, status: value.status, steps: [], affectedNodeIds: [], affectedResourceIds: [], warnings: [] };
 const scheduler = createUIYield(message => figma.ui.postMessage(message));
 let pager = new TreePager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
 let search = new SearchPager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
@@ -37,8 +112,18 @@ let reading = false;
 return async (message: any) => {
   if (!message || typeof message !== 'object') return;
   if (scheduler.accept(message)) return;
+  if (message.type === 'setWriteEnabled' && typeof message.enabled === 'boolean' && Object.keys(message).length === 2) {
+    writeEnabled = candidate && message.enabled && connectionGeneration !== undefined;
+    if (!writeEnabled) executor.stop();
+    figma.ui.postMessage({ type: 'writeState', enabled: writeEnabled, ...(!writeEnabled && message.enabled ? { reason: 'CAPABILITY_UNAVAILABLE' } : {}) });
+    return;
+  }
+  if (message.type === 'stop' && Object.keys(message).length === 1) {
+    writeEnabled = false; executor.stop(); figma.ui.postMessage({ type: 'writeState', enabled: false }); return;
+  }
   if (message.type === 'hello-request' && Object.keys(message).length === 1) {
     awaitingWelcome = true;
+    writeEnabled = false; executor.stop();
     connectionGeneration = undefined;
     pager.clear(); search.clear(); resources.clear(); scheduler.release();
     figma.ui.postMessage({ type: 'hello', protocolVersion: PROTOCOL_VERSION, sessionId,
@@ -63,6 +148,7 @@ return async (message: any) => {
       writeEnabled: Boolean(diagnostic), message: diagnostic ? 'Диагностика: разрешено только создание тестового маркера.' : 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
   } else if (message.type === 'disconnected' && Object.keys(message).length === 1) {
     awaitingWelcome = false;
+    writeEnabled = false; executor.stop();
     connectionGeneration = undefined;
     pager.clear(); search.clear(); resources.clear(); scheduler.release();
   } else if (message.type === 'getContext') {
@@ -81,15 +167,34 @@ return async (message: any) => {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       checkDocument();
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
-      if (reading) throw new Error('RESOURCE_LIMIT');
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (reading && !['applyBatch', 'getOperation', 'cancel'].includes(command.command)) throw new Error('RESOURCE_LIMIT');
     } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && error.message === 'DOCUMENT_MISMATCH' ? 'DOCUMENT_MISMATCH' : 'INVALID_ARGUMENT' }); return; }
-    reading = true;
     const scope = { sessionId, connectionGeneration };
+    if (candidate && ['applyBatch', 'getOperation', 'cancel'].includes(command.command)) {
+      try {
+        let data;
+        if (command.command === 'applyBatch') {
+          const steps = (command.params as { steps: unknown[] }).steps;
+          if (steps.length > limits.maxBatchSteps) throw new Error('RESOURCE_LIMIT');
+          data = await executor.submit(scope, command.operationId, steps, Date.now());
+          if (data && 'fresh' in data) data = snapshot(command.operationId, scope, data);
+        } else {
+          const value = command.command === 'cancel' ? executor.cancel(command.operationId) : executor.get(command.operationId);
+          data = snapshot(command.operationId, scope, value);
+        }
+        if (scope.connectionGeneration === connectionGeneration) figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data });
+      } catch (error) {
+        const code = error instanceof Error && ['WRITE_DISABLED', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'RESOURCE_LIMIT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'CAPABILITY_UNAVAILABLE'].includes(error.message) ? error.message : 'INVALID_ARGUMENT';
+        figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data: { error: { code, message: code, recoveryAction: 'Check operation and document state.' } } });
+      }
+      return;
+    }
+    reading = true;
     if (command.command === 'applyBatch' && diagnostic) {
       try {
         const data = await diagnostic.run(command, scope, () => { checkDocument(); if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); });
-        figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, data });
+        figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data });
       } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && ['SESSION_EXPIRED', 'DOCUMENT_MISMATCH'].includes(error.message) ? error.message : 'INVALID_ARGUMENT' }); }
       finally { reading = false; }
       return;

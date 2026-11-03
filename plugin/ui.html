@@ -3,12 +3,15 @@
 <head><meta charset="utf-8"><title>Figma MCP Bridge</title></head>
 <body>
 <h2>Figma MCP Bridge</h2>
-<p>Full-document / YOLO — запись выключена: реализация команд ещё не подключена.</p>
+<p>Full-document / YOLO</p>
 <label for="secret">Секрет из локального файла сопряжения</label>
 <input id="secret" type="password" autocomplete="off" spellcheck="false">
 <button id="connect">Подключиться</button> <button id="disconnect" disabled>Отключиться</button>
 <p id="status" role="status">Не подключено.</p>
 <p id="document"></p>
+<label><input id="write" type="checkbox" disabled> Разрешить запись</label>
+<p id="write-status">Запись выключена. До проверки границы документа в Desktop включение недоступно.</p>
+<button id="stop" disabled>Остановить очередь</button>
 <p id="operation">Текущая операция: нет.</p>
 <!-- UI_SCRIPT -->
 </body>

@@ -19,7 +19,7 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
   const chunk = (name, body) => {
     const type = Buffer.from(name), length = Buffer.alloc(4), crc = Buffer.alloc(4);
     length.writeUInt32BE(body.length);

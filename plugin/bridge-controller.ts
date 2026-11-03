@@ -6,6 +6,8 @@ type Options = {
   setStatus: (message: string) => void;
   setConnected: (connected: boolean) => void;
   setDocument: (document: string) => void;
+  setOperation?: (operation: string) => void;
+  setWriteState?: (enabled: boolean, reason?: string) => void;
   allowedCommands: readonly string[];
   writeEnabled: boolean;
   mainSchema?: { safeParse: (value: unknown) => { success: boolean; data?: any } };
@@ -21,7 +23,7 @@ export function createBridgeController(options: Options) {
   const reset = () => {
     phase = 'pairing'; sessionId = undefined; binding = undefined;
     options.sendMain({ type: 'disconnected' });
-    options.setConnected(false); options.setDocument('');
+    options.setConnected(false); options.setDocument(''); options.setOperation?.(''); options.setWriteState?.(false);
   };
   const sameScope = (message: { sessionId: string; connectionGeneration: number }) =>
     !!binding && message.sessionId === binding.sessionId && message.connectionGeneration === binding.connectionGeneration;
@@ -59,7 +61,7 @@ export function createBridgeController(options: Options) {
           if (phase !== 'ready' || !binding) throw new Error('PROTOCOL_MISMATCH');
           const command = validateCommand(raw, { sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration });
           if (!options.allowedCommands.includes(command.command) || !binding.capabilities.includes(command.command)) throw new Error('PROTOCOL_MISMATCH');
-          options.sendMain(command);
+          options.setOperation?.(command.command); options.sendMain(command);
         } catch (error) { fail(current, 'PROTOCOL_MISMATCH', 'ui', error instanceof Error && error.message === 'SESSION_EXPIRED' ? 'SESSION_EXPIRED' : 'PROTOCOL_MISMATCH'); }
       };
       current.onerror = () => { if (socket === current) options.setStatus('Ошибка подключения к локальному мосту.'); };
@@ -67,7 +69,7 @@ export function createBridgeController(options: Options) {
         token = '';
         if (socket !== current) return;
         socket = undefined; reset();
-        options.setStatus('Отключено' + (event.reason ? ': ' + event.reason : '.'));
+        options.setStatus(['SESSION_BUSY', 'AUTH_FAILED', 'PROTOCOL_MISMATCH'].includes(event.reason) ? event.reason : 'Disconnected.');
       };
     },
     disconnect() {
@@ -75,6 +77,8 @@ export function createBridgeController(options: Options) {
       if (current) current.close();
       reset(); options.setStatus('Отключено пользователем.');
     },
+    setWriteEnabled(enabled: boolean) { options.sendMain({ type: 'setWriteEnabled', enabled }); },
+    stop() { options.sendMain({ type: 'stop' }); },
     sendExtension(raw: unknown) {
       if (!socket || socket.readyState !== WebSocket.OPEN || phase !== 'ready' || !options.extension) throw new Error('NOT_CONNECTED');
       socket.send(JSON.stringify(options.extension.parseControl(raw)));
@@ -88,17 +92,24 @@ export function createBridgeController(options: Options) {
       if (message.type === 'hello' && phase === 'hello' && message.protocolVersion === PROTOCOL_VERSION && message.writeEnabled === options.writeEnabled) {
         sessionId = message.sessionId; phase = 'welcome'; socket.send(JSON.stringify(message)); return;
       }
+      if (message.type === 'writeState' && phase === 'ready' && binding) { options.setWriteState?.(message.enabled, message.reason); socket.send(JSON.stringify({ ...message, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration })); return; }
       if (message.type === 'error') { fail(socket, message.code, 'main'); return; }
       if (message.type === 'bound' && phase === 'ready' && sameScope(message) && message.writeEnabled === options.writeEnabled) {
         options.setStatus(message.message); options.setDocument(message.documentLabel); return;
       }
-      if (message.type === 'operationResult' && (!options.writeEnabled || !options.allowedCommands.includes('applyBatch') || !binding?.capabilities.includes('applyBatch'))) {
+      if (message.type === 'operationResult' && (!options.allowedCommands.includes('applyBatch') || !binding?.capabilities.includes('applyBatch'))) {
         fail(socket); return;
       }
       if (['exportStart', 'exportChunk', 'exportError'].includes(message.type) && (!options.allowedCommands.includes('exportNode') || !binding?.capabilities.includes('exportNode'))) {
         fail(socket); return;
       }
       if (phase === 'ready' && 'sessionId' in message && 'connectionGeneration' in message && sameScope(message)) {
+        if (message.type === 'operationResult') {
+          const result = message.data;
+          const error = 'operationId' in result ? result.error ?? result.steps.find(step => step.error)?.error : result.error;
+          if (error) options.setStatus('Error: ' + error.code);
+        }
+        if (message.type !== 'ack' && message.type !== 'exportStart' && message.type !== 'exportChunk') options.setOperation?.('');
         socket.send(JSON.stringify(message)); return;
       }
       fail(socket);

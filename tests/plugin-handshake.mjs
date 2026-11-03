@@ -59,7 +59,7 @@ assert.equal(messages.pop().error.code, 'INVALID_CURSOR');
 console.log('Main: hello, чужая сессия, welcome и отключение — OK');
 
 const html = await readFile('dist/plugin/ui.html', 'utf8');
-const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
+const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
 const sentMain = [], sockets = [];
 class FakeSocket {
   static OPEN = 1;

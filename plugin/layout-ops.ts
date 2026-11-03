@@ -9,6 +9,7 @@ const modes = ['HORIZONTAL', 'VERTICAL'];
 
 export function layoutOperations(api: Api) {
   let node: any;
+  let schemaStep: BatchStep;
   let related = new Map<string, any>();
   async function find(id: string) {
     const result = await api.getNodeByIdAsync(id);
@@ -35,7 +36,7 @@ export function layoutOperations(api: Api) {
     return out;
   }
   function validate(step: BatchStep) {
-    if (!stepSchema.safeParse(step).success) throw new Error('INVALID_ARGUMENT');
+    if (!stepSchema.safeParse(schemaStep).success) throw new Error('INVALID_ARGUMENT');
     if (!node || node.removed) throw new Error('NODE_NOT_FOUND');
     if (!node.parent || node.type === 'PAGE' || node.type === 'DOCUMENT') throw new Error('INVALID_ARGUMENT');
     const bindings = node.boundVariables ?? {};
@@ -70,9 +71,10 @@ export function layoutOperations(api: Api) {
     throw new Error('CAPABILITY_UNAVAILABLE');
   }
   return {
-    async prepare(step: BatchStep) {
+    async prepare(step: BatchStep, original: BatchStep = step) {
+      schemaStep = original;
       if (!['setConstraints', 'setAutoLayout', 'setLayoutSizing'].includes(step.op)) throw new Error('CAPABILITY_UNAVAILABLE');
-      if (!stepSchema.safeParse(step).success) throw new Error('INVALID_ARGUMENT');
+      if (!stepSchema.safeParse(schemaStep).success) throw new Error('INVALID_ARGUMENT');
       node = await find((step.target as { nodeId: string }).nodeId);
       validate(step);
       related = new Map();

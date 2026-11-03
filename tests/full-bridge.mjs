@@ -19,7 +19,7 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
   let invalidate;
   const textNode = { id: '1:1', name: 'Target', type: 'TEXT', visible: false, locked: true };
   const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [textNode], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };

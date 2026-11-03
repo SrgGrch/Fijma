@@ -22,8 +22,8 @@ const commandTools = {
   getOperation: 'figma_get_operation', cancel: 'figma_cancel_operation', exportNode: 'figma_export_node',
 } as const;
 const commandSchema = z.strictObject({ type: z.literal('command'), ...scopeSchema.shape,
-  operationId: operationIdSchema, command: z.enum(Object.keys(commandTools) as [string, ...string[]]), params: z.record(z.string(), z.json()) });
-export const ackSchema = z.strictObject({ type: z.literal('ack'), ...scopeSchema.shape, operationId: operationIdSchema });
+  operationId: operationIdSchema, requestId: z.string().uuid().optional(), command: z.enum(Object.keys(commandTools) as [string, ...string[]]), params: z.record(z.string(), z.json()) });
+export const ackSchema = z.strictObject({ type: z.literal('ack'), ...scopeSchema.shape, operationId: operationIdSchema, requestId: z.string().uuid().optional() });
 
 export function negotiateHello(raw: unknown, generation: number, diagnostic = false) {
   const hello = helloSchema.parse(raw);
@@ -31,7 +31,7 @@ export function negotiateHello(raw: unknown, generation: number, diagnostic = fa
   if (diagnostic && (!hello.writeEnabled || !hello.capabilities.includes('applyBatch'))) throw new Error('PROTOCOL_MISMATCH');
   const limits = Object.fromEntries(Object.entries(hello.limits).map(([key, value]) => [key, Math.min(value, bootstrapLimits[key as keyof typeof bootstrapLimits])]));
   return welcomeSchema.parse({ ...hello, type: 'welcome', connectionGeneration: generation, limits, writeEnabled: diagnostic,
-    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])].includes(value)) });
+    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel'].includes(value)) });
 }
 
 export function validateCommand(raw: unknown, scope: z.infer<typeof scopeSchema>) {

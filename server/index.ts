@@ -43,7 +43,7 @@ const server = createServer(() => listener.getContext(), args => listener.getTre
     const binding = listener.getBinding();
     if (!binding || !resources) throw new Error('RESOURCE_EXPIRED');
     return resources.read(binding.sessionId, uri);
-  });
+  }, args => listener.applyBatch(args), args => listener.getOperation(args), args => listener.cancel(args));
 let closing = false;
 const close = async () => {
   if (closing) return;
