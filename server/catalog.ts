@@ -1,4 +1,4 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, ResourceTemplate, ProtocolError } from '@modelcontextprotocol/server';
 import type { z } from 'zod';
 import { toolInputs } from '../shared/contracts';
 import { contextSchema, disconnectedContext } from '../shared/context';
@@ -26,8 +26,16 @@ const descriptions: Record<keyof typeof toolInputs, string> = {
 };
 
 export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>,
-  getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>, navigate?: (args: unknown) => Promise<unknown>) {
+  getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>, navigate?: (args: unknown) => Promise<unknown>,
+  exportNode?: (args: unknown) => Promise<unknown>, readResource?: (uri: string) => { uri: string; mimeType: string; data: Buffer }) {
   const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' });
+  if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
+    { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
+      try {
+        const resource = readResource(uri.href);
+        return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, blob: resource.data.toString('base64') }] };
+      } catch { throw new ProtocolError(-32602, 'RESOURCE_EXPIRED: повторите экспорт.'); }
+    });
   for (const [name, inputSchema] of Object.entries(toolInputs)) {
     server.registerTool(name, {
       description: descriptions[name as keyof typeof descriptions], inputSchema,
@@ -41,6 +49,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         else if (name === 'figma_get_nodes' && getNodes) output = nodesOutputSchema.parse(await getNodes(args));
         else if (name === 'figma_get_local_resources' && getLocalResources) output = resourcesOutputSchema.parse(await getLocalResources(args));
         else if (name === 'figma_navigate' && navigate) output = navigateOutputSchema.parse(await navigate(args));
+        else if (name === 'figma_export_node' && exportNode) output = exportOutputSchema.parse(await exportNode(args));
         else {
           const context = contextSchema.parse(await getContext());
           output = { error: { code: context.state === 'ready' ? 'CAPABILITY_UNAVAILABLE' : 'NOT_CONNECTED',
@@ -51,7 +60,12 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
         output = { error: { code, message: 'Запрос документа недоступен.', recoveryAction: 'Переподключите плагин и повторите чтение контекста.' } };
       }
-      return { structuredContent: output, content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+      const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
+      if (name === 'figma_export_node' && !('error' in output)) {
+        if (output.format === 'PNG' && 'data' in output) content.push({ type: 'image', mimeType: 'image/png', data: output.data });
+        else if ('uri' in output) content.push({ type: 'resource_link', uri: output.uri, name: 'Figma export', mimeType: output.mimeType });
+      }
+      return { structuredContent: output, content,
         ...('error' in output ? { isError: true } : {}) };
     });
   }

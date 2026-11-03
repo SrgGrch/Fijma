@@ -4,6 +4,7 @@ import { operationResultSchema } from './operation-result';
 import { helloSchema, welcomeSchema, ackSchema } from './protocol';
 import { contextReplySchema, contextRequestSchema } from './context';
 import { treeReplySchema, searchReplySchema, nodesReplySchema, resourcesReplySchema, navigateReplySchema } from './tree-result';
+import { exportStartSchema, exportChunkSchema, exportErrorSchema } from './export-wire';
 
 export const pairedSchema = z.strictObject({ type: z.literal('paired') });
 export const yieldSchema = z.strictObject({ type: z.literal('yield'), id: z.number().int().positive().safe() });
@@ -21,5 +22,5 @@ export const diagnosticEventSchema = z.discriminatedUnion('event', [
 ]);
 export const mainErrorSchema = z.strictObject({ type: z.literal('error'), code: errorSchema.shape.code });
 export const mainMessageSchema = z.union([helloSchema, boundSchema, contextReplySchema, treeReplySchema, searchReplySchema,
-  nodesReplySchema, resourcesReplySchema, navigateReplySchema, operationReplySchema, ackSchema, mainErrorSchema, yieldSchema]);
+  nodesReplySchema, resourcesReplySchema, navigateReplySchema, exportStartSchema, exportChunkSchema, exportErrorSchema, operationReplySchema, ackSchema, mainErrorSchema, yieldSchema]);
 export const serverMessageSchema = z.union([pairedSchema, welcomeSchema, contextRequestSchema]);

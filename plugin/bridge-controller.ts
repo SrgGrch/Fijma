@@ -95,6 +95,9 @@ export function createBridgeController(options: Options) {
       if (message.type === 'operationResult' && (!options.writeEnabled || !options.allowedCommands.includes('applyBatch') || !binding?.capabilities.includes('applyBatch'))) {
         fail(socket); return;
       }
+      if (['exportStart', 'exportChunk', 'exportError'].includes(message.type) && (!options.allowedCommands.includes('exportNode') || !binding?.capabilities.includes('exportNode'))) {
+        fail(socket); return;
+      }
       if (phase === 'ready' && 'sessionId' in message && 'connectionGeneration' in message && sameScope(message)) {
         socket.send(JSON.stringify(message)); return;
       }

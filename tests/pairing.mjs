@@ -36,6 +36,8 @@ try {
   active.send(JSON.stringify({ type: 'pair', secret: file.secret }));
   assert.equal(JSON.parse((await paired)[0].toString()).type, 'paired');
   const limits = Object.fromEntries(['maxMessageBytes', 'maxBatchSteps', 'maxQueuedOperations', 'maxDepth', 'maxNodes', 'maxResponseBytes', 'maxImportBytes', 'maxExportPixels', 'maxExportBytes', 'operationTimeout', 'dedupTtl', 'maxJournalEntries', 'resourceTtl', 'clockSkew'].map(key => [key, 10]));
+  limits.maxMessageBytes = 65536;
+  limits.operationTimeout = 5000;
   const welcome = once(active, 'message');
   active.send(JSON.stringify({ type: 'hello', protocolVersion: 1, sessionId: 'first', capabilities: ['getContext', 'getTree'], limits, writeEnabled: false }));
   const firstGeneration = JSON.parse((await welcome)[0].toString()).connectionGeneration;

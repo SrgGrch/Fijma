@@ -91,7 +91,7 @@ try {
   assert.deepEqual((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.selection, ['1:1']);
   const stale = await client.callTool({ name: 'figma_get_tree', arguments: { scope: { ...scope, sessionId: 'old' }, rootId: '0:1', depth: 1, limit: 10 } });
   assert.equal(stale.structuredContent.error.code, 'SESSION_EXPIRED');
-  const unsupported = await client.callTool({ name: 'figma_export_node', arguments: { scope, nodeId: '0:1', format: 'PNG' } });
+  const unsupported = await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: '019a4a10-0000-7000-8000-000000000001' } });
   assert.equal(unsupported.structuredContent.error.code, 'CAPABILITY_UNAVAILABLE');
   const navigation = await client.callTool({ name: 'figma_navigate', arguments: { scope, nodeIds: ['2:1'], select: true, reveal: true } });
   assert.equal(navigation.structuredContent.currentPageId, '0:2');

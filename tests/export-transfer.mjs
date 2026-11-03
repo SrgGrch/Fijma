@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+const built = await build({ entryPoints: ['server/export-transfer.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { ExportTransfer } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+const wireBuild = await build({ entryPoints: ['shared/export-wire.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { chunkSizeFor } = await import(`data:text/javascript;base64,${Buffer.from(wireBuild.outputFiles[0].text).toString('base64')}`);
+const scope = { sessionId: 's', connectionGeneration: 1, operationId: '019a4a10-0000-7000-8000-000000000001' };
+const limits = { maxExportBytes: 30000, maxExportPixels: 1000, maxMessageBytes: 65536 };
+const png = Buffer.alloc(13000);
+Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]).copy(png);
+png.writeUInt32BE(20, 16); png.writeUInt32BE(10, 20);
+const header = { type: 'exportStart', ...scope, nodeId: 'n', format: 'PNG', bytes: png.length, total: 2, chunkBytes: 12288, width: 20, height: 10 };
+const part = index => ({ type: 'exportChunk', ...scope, index, total: 2, data: png.subarray(index * 12288, (index + 1) * 12288).toString('base64') });
+const make = () => new ExportTransfer(scope, { nodeId: 'n', format: 'PNG' }, limits);
+const transfer = make(); transfer.accept(header); assert.equal(transfer.accept(part(0)), undefined);
+assert.deepEqual(transfer.accept(part(1)).data, png);
+assert.throws(() => make().accept({ ...header, bytes: 30001, total: 3 }), /PROTOCOL_MISMATCH/);
+assert.throws(() => make().accept({ ...header, connectionGeneration: 2 }), /PROTOCOL_MISMATCH/);
+const outOfOrder = make(); outOfOrder.accept(header); assert.throws(() => outOfOrder.accept(part(1)), /PROTOCOL_MISMATCH/);
+const badLength = make(); badLength.accept(header); assert.throws(() => badLength.accept({ ...part(0), data: Buffer.from('x').toString('base64') }), /PROTOCOL_MISMATCH/);
+const badHeader = make(); badHeader.accept({ ...header, width: 21 }); badHeader.accept(part(0));
+assert.throws(() => badHeader.accept(part(1)), /PROTOCOL_MISMATCH/);
+const duplicate = make(); duplicate.accept(header); assert.throws(() => duplicate.accept(header), /PROTOCOL_MISMATCH/);
+const narrow = { maxExportBytes: 30000, maxExportPixels: 1000, maxMessageBytes: 300 };
+const size = chunkSizeFor(scope, narrow);
+assert.ok(size < 12288);
+const tinyTransfer = new ExportTransfer(scope, { nodeId: 'n', format: 'PNG' }, narrow);
+const total = Math.ceil(png.length / size);
+tinyTransfer.accept({ ...header, total, chunkBytes: size });
+let reconstructed;
+for (let index = 0; index < total; index++) {
+  const message = { type: 'exportChunk', ...scope, index, total, data: png.subarray(index * size, (index + 1) * size).toString('base64') };
+  assert.ok(Buffer.byteLength(JSON.stringify(message)) <= narrow.maxMessageBytes);
+  reconstructed = tinyTransfer.accept(message);
+}
+assert.deepEqual(reconstructed.data, png);
+assert.throws(() => chunkSizeFor(scope, { ...narrow, maxMessageBytes: 10 }), /RESOURCE_LIMIT/);
+console.log('Export transfer: scope, ordering, length, bytes and PNG metadata validation OK');

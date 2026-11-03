@@ -9,7 +9,7 @@ const controller = createBridgeController({
   setStatus: message => { status.textContent = message; },
   setConnected: connected => { connect.disabled = connected; disconnect.disabled = !connected; },
   setDocument: name => { document.getElementById('document')!.textContent = name ? 'Документ: ' + name : ''; },
-  allowedCommands: ['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate'],
+  allowedCommands: ['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode'],
   writeEnabled: false,
 });
 connect.onclick = () => { const token = secret.value; secret.value = ''; controller.connect(token); };

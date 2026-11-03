@@ -7,6 +7,8 @@ import { createUIYield } from '../shared/ui-yield';
 import { readNodes } from './projections';
 import { ResourcePager } from './resources';
 import { navigate } from './navigation';
+import { exportNode } from './export';
+import { chunkSizeFor } from '../shared/export-wire';
 
 export function createBridgeRuntime(diagnostic?: { run: (command: any, scope: { sessionId: string; connectionGeneration: number }, checkScope: () => void) => Promise<unknown> }) {
 const documentRoot = figma.root;
@@ -14,7 +16,7 @@ const checkDocument = () => { if (figma.root !== documentRoot) throw new Error('
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', ...(diagnostic ? ['applyBatch'] : [])];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])];
 const scheduler = createUIYield(message => figma.ui.postMessage(message));
 let pager = new TreePager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
 let search = new SearchPager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
@@ -79,7 +81,7 @@ return async (message: any) => {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       checkDocument();
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', ...(diagnostic ? ['applyBatch'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
       if (reading) throw new Error('RESOURCE_LIMIT');
     } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && error.message === 'DOCUMENT_MISMATCH' ? 'DOCUMENT_MISMATCH' : 'INVALID_ARGUMENT' }); return; }
     reading = true;
@@ -92,9 +94,21 @@ return async (message: any) => {
       finally { reading = false; }
       return;
     }
-    const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult', navigate: 'navigateResult' };
+    const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult', navigate: 'navigateResult', exportNode: 'exportError' };
     const reply = { type: replyType[command.command as keyof typeof replyType], ...scope, operationId: command.operationId };
     try {
+      if (command.command === 'exportNode') {
+        const query = command.params as { nodeId: string; format: 'PNG' | 'SVG'; scale?: number };
+        const check = () => { checkDocument(); if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); };
+        const chunkBytes = chunkSizeFor({ ...scope, operationId: command.operationId }, limits);
+        await exportNode(figma, query, limits, check, chunkBytes,
+          data => {
+            const message = { ...scope, operationId: command.operationId, ...data };
+            if (encodeURI(JSON.stringify(message)).replace(/%[A-F\d]{2}/g, 'x').length > limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
+            figma.ui.postMessage(message);
+          }, scheduler.wait);
+        return;
+      }
       if (command.command === 'navigate') {
         const query = command.params as { pageId?: string; nodeIds: string[]; select: boolean; reveal: boolean };
         if (query.nodeIds.length > limits.maxNodes) throw new Error('RESOURCE_LIMIT');
@@ -145,7 +159,9 @@ return async (message: any) => {
       figma.ui.postMessage({ ...reply, data });
     } catch (error) {
       const code = error instanceof Error && ['SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'NODE_NOT_FOUND', 'INVALID_CURSOR', 'INVALID_ARGUMENT', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
-      figma.ui.postMessage({ ...reply, error: { code, message: 'Не удалось прочитать документ.', recoveryAction: 'Перечитайте контекст и начните чтение заново.' } });
+      const recoveryAction = command.command === 'exportNode' && code === 'RESOURCE_LIMIT' ?
+        'Уменьшите область экспорта или масштаб и повторите запрос.' : 'Перечитайте контекст и начните чтение заново.';
+      figma.ui.postMessage({ ...reply, error: { code, message: 'Не удалось прочитать документ.', recoveryAction } });
     } finally { reading = false; }
   }
 };

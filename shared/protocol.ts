@@ -31,7 +31,7 @@ export function negotiateHello(raw: unknown, generation: number, diagnostic = fa
   if (diagnostic && (!hello.writeEnabled || !hello.capabilities.includes('applyBatch'))) throw new Error('PROTOCOL_MISMATCH');
   const limits = Object.fromEntries(Object.entries(hello.limits).map(([key, value]) => [key, Math.min(value, bootstrapLimits[key as keyof typeof bootstrapLimits])]));
   return welcomeSchema.parse({ ...hello, type: 'welcome', connectionGeneration: generation, limits, writeEnabled: diagnostic,
-    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', ...(diagnostic ? ['applyBatch'] : [])].includes(value)) });
+    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : [])].includes(value)) });
 }
 
 export function validateCommand(raw: unknown, scope: z.infer<typeof scopeSchema>) {
