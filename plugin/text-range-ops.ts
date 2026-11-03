@@ -1,5 +1,5 @@
 import type { BatchStep } from '../shared/batch-refs';
-import { checkTextPatch } from './text-links';
+import { checkTextPatch, unavailableFonts } from './text-links';
 
 type Font = { family: string; style: string };
 type Changes = { nodeIds: string[]; resourceIds: string[] };
@@ -17,9 +17,10 @@ export function textRangeOperations(figma: Api) {
     return found;
   };
   const current = () => {
-    if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
     const segments = node.characters.length ? node.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']) : [];
-    const fonts = node.characters.length ? node.getRangeAllFontNames(0, node.characters.length) : [node.fontName];
+    let fonts: any;
+    try { fonts = node.characters.length ? node.getRangeAllFontNames(0, node.characters.length) : [node.fontName]; }
+    catch { throw new Error('FONT_UNAVAILABLE'); }
     if (!Array.isArray(fonts) || !fonts.length || fonts.some((font: any) => !isFont(font))) throw new Error('FONT_UNAVAILABLE');
     return { fonts: fonts as Font[], segments, signature: JSON.stringify([node.characters, segments, fonts, node.boundVariables]) };
   };
@@ -71,9 +72,12 @@ export function textRangeOperations(figma: Api) {
       const needed = [...state.fonts];
       const newFont = step.op === 'formatTextRange' ? (step.format as any).fontName : (step.insertionFormatting as any).format?.fontName;
       if (newFont && !needed.some(font => font.family === newFont.family && font.style === newFont.style)) needed.push(newFont);
+      const missing: Font[] = [];
       for (const font of needed.filter((font, i) => needed.findIndex(other => font.family === other.family && font.style === other.style) === i)) {
-        try { await figma.loadFontAsync(font); } catch { throw new Error('FONT_UNAVAILABLE'); }
+        try { await figma.loadFontAsync(font); } catch { missing.push(font); }
       }
+      if (missing.length) throw unavailableFonts(missing);
+      if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
       related = new Map();
       for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
@@ -85,6 +89,7 @@ export function textRangeOperations(figma: Api) {
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
       validate(step);
+      if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
       const state = current();
       if (state.signature !== snapshot) throw new Error('CONFLICT');
       checkLinks(step, state.segments);

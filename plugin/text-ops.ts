@@ -1,5 +1,5 @@
 import type { BatchStep } from '../shared/batch-refs';
-import { checkTextPatch } from './text-links';
+import { checkTextPatch, unavailableFonts } from './text-links';
 
 type Font = { family: string; style: string };
 type Changes = { nodeIds: string[]; resourceIds: string[] };
@@ -19,8 +19,9 @@ export function textOperations(figma: TextApi) {
     return value;
   };
   const fonts = () => {
-    if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
-    const list = node.characters.length ? node.getRangeAllFontNames(0, node.characters.length) : [node.fontName];
+    let list: any;
+    try { list = node.characters.length ? node.getRangeAllFontNames(0, node.characters.length) : [node.fontName]; }
+    catch { throw new Error('FONT_UNAVAILABLE'); }
     if (!Array.isArray(list) || !list.length || list.some((font: any) => !validFont(font))) throw new Error('FONT_UNAVAILABLE');
     return list as Font[];
   };
@@ -69,9 +70,12 @@ export function textOperations(figma: TextApi) {
       const needed = node ? [...fonts()] : [];
       if (node) { checkBindings(step); original = signature(); }
       if (newFont && !needed.some(font => sameFont(font, newFont))) needed.push(newFont);
+      const missing: Font[] = [];
       for (const font of needed.filter((f, i) => needed.findIndex(other => sameFont(f, other)) === i)) {
-        try { await figma.loadFontAsync(font); } catch { throw new Error('FONT_UNAVAILABLE'); }
+        try { await figma.loadFontAsync(font); } catch { missing.push(font); }
       }
+      if (missing.length) throw unavailableFonts(missing);
+      if (node?.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
       for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
     async readExpected(step: BatchStep) {
@@ -82,7 +86,7 @@ export function textOperations(figma: TextApi) {
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
       if (node?.removed || parent?.removed) throw new Error('NODE_NOT_FOUND');
-      if (node) { if (signature() !== original) throw new Error('CONFLICT'); checkBindings(step); }
+      if (node) { if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE'); if (signature() !== original) throw new Error('CONFLICT'); checkBindings(step); }
       const changed = (target: any) => record({ nodeIds: [target.id], resourceIds: [] });
       const creating = step.op === 'createText' || step.op === 'createNode';
       const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.op === 'setText' ? {} : step.patch) as Record<string, any>;

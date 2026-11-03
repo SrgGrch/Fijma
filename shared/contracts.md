@@ -70,4 +70,6 @@ Read-схемы отделены от write: они сохраняют нуле�
 
 Коды ошибок: NOT_CONNECTED, AUTH_FAILED, SESSION_BUSY, PROTOCOL_MISMATCH, SESSION_EXPIRED, DOCUMENT_MISMATCH, INVALID_ARGUMENT, INVALID_CURSOR, NODE_NOT_FOUND, CAPABILITY_UNAVAILABLE, FONT_UNAVAILABLE, CONFLICT, OPERATION_ID_CONFLICT, OPERATION_EXPIRED, RESOURCE_LIMIT, RESOURCE_EXPIRED, WRITE_DISABLED, FIGMA_API_ERROR, OUTCOME_UNKNOWN. При CONFLICT нужно перечитать объект, при OUTCOME_UNKNOWN — выяснить статус и перечитать документ без слепого повтора.
 
+Если имена недоступных шрифтов удалось определить, FONT_UNAVAILABLE содержит `details.fonts` — массив `{family,style}`. Когда Figma сообщает о недостающем шрифте без определяемого имени, ошибка может прийти без списка. Исходный текст исключения API не передаётся.
+
 Схемы описывают целевой контракт, а не доступность всех функций. Сейчас подключены context, tree и find; обработчики остальных инструментов и проверка предусловий в Figma ещё реализуются. Запись отключена до проверки границы документа в задаче 1.2. Фактические возможности сообщает context. Каталог публикует схемы результатов всех инструментов; проекции чтения и их обработчики уточняются в задаче 4.3.

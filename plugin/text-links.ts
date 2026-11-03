@@ -5,6 +5,10 @@ const bindingFields: Record<string, string[]> = {
 };
 const styleFields = ['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration'];
 
+export function unavailableFonts(fonts: { family: string; style: string }[]) {
+  return Object.assign(new Error('FONT_UNAVAILABLE'), { code: 'FONT_UNAVAILABLE', details: { fonts: fonts.map(({ family, style }) => ({ family, style })) } });
+}
+
 // Applied fields must not silently replace an existing text style or variable binding.
 export function checkTextPatch(segments: any[], patch: Record<string, unknown>) {
   const fields = Object.keys(patch);

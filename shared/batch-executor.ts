@@ -5,22 +5,27 @@ import type { BatchStep } from './batch-refs';
 type Changes = { nodeIds: string[]; resourceIds: string[]; details?: unknown[] };
 type Outputs = Partial<Record<'nodeId' | 'styleId' | 'collectionId' | 'modeId' | 'variableId', string>>;
 type StepResult = { stepId: string; status: 'succeeded' | 'failed' | 'skipped'; outputs: Outputs; appliedChanges: Changes; error?: Failure };
-type Failure = { code: string; message: string; failedStep?: string; recoveryAction: string };
+type Failure = { code: string; message: string; failedStep?: string; details?: unknown; recoveryAction: string };
 type Scope = { sessionId: string; connectionGeneration: number };
 type Job = { cancelled: boolean; steps: BatchStep[]; scope: Scope; operationId: string };
 type Platform = {
   checkScope(scope: Scope): void;
-  prepare(step: BatchStep): Promise<void>;
+  preflight?(step: BatchStep): void;
+  yieldControl?(): Promise<void>;
+  prepare(step: BatchStep, original?: BatchStep): Promise<void>;
   readExpected(step: BatchStep): Promise<Record<string, unknown>>;
   execute(step: BatchStep, record: (changes: Changes) => void, cancelled: () => boolean): Promise<Outputs>;
+  verify?(step: BatchStep, changes: Changes): Promise<unknown[]>;
   commitUndo(): void;
 };
 const empty = (): Changes => ({ nodeIds: [], resourceIds: [] });
 const error = (e: unknown, stepId?: string): Failure => {
   const message = e instanceof Error ? e.message : String(e);
-  const codes = ['INVALID_ARGUMENT', 'CONFLICT', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'WRITE_DISABLED', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE'];
+  const codes = ['INVALID_ARGUMENT', 'CONFLICT', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'WRITE_DISABLED', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE', 'RESOURCE_LIMIT'];
   const code = codes.includes(message) ? message : 'FIGMA_API_ERROR';
-  return { code, message: code === 'FIGMA_API_ERROR' ? 'The operation failed.' : message, ...(stepId ? { failedStep: stepId } : {}), recoveryAction: code === 'CONFLICT' ? 'Read the current state and prepare a new operation.' : 'Inspect the operation and current document state.' };
+  const fonts = code === 'FONT_UNAVAILABLE' && e && typeof e === 'object' ? (e as any).details?.fonts : undefined;
+  const validFonts = Array.isArray(fonts) && fonts.length > 0 && fonts.length <= 100 && fonts.every(f => f && typeof f.family === 'string' && f.family.length > 0 && f.family.length <= 200 && typeof f.style === 'string' && f.style.length > 0 && f.style.length <= 200);
+  return { code, message: code === 'FIGMA_API_ERROR' ? 'The operation failed.' : message, ...(validFonts ? { details: { fonts: fonts.map(f => ({ family: f.family, style: f.style })) } } : {}), ...(stepId ? { failedStep: stepId } : {}), recoveryAction: code === 'CONFLICT' ? 'Read the current state and prepare a new operation.' : 'Inspect the operation and current document state.' };
 };
 function equal(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -58,6 +63,7 @@ export class BatchExecutor {
   submit(scope: Scope, operationId: string, input: unknown, now: number) {
     this.platform.checkScope(scope);
     const steps = batchSchema.parse(input) as BatchStep[];
+    for (const step of steps) this.platform.preflight?.(step);
     // A retry must remain available even when the queue is full.
     if (!this.journal.has(operationId) && this.jobs.size >= this.maxQueuedOperations) throw new Error('RESOURCE_LIMIT');
     const reservation = this.journal.reserve(operationId, { command: 'figma_apply_batch', params: { steps } }, now);
@@ -87,9 +93,11 @@ export class BatchExecutor {
       if (status !== 'succeeded') continue;
       if (job.cancelled) { status = 'cancelled'; continue; }
       try {
+        await this.platform.yieldControl?.();
+        if (job.cancelled) { status = 'cancelled'; continue; }
         this.platform.checkScope(scope);
         const step = resolve(original, outputs);
-        await this.platform.prepare(step);
+        await this.platform.prepare(step, original);
         if (job.cancelled) { status = 'cancelled'; continue; }
         this.platform.checkScope(scope);
         if (step.expected) {
@@ -105,6 +113,10 @@ export class BatchExecutor {
           item.appliedChanges.resourceIds.push(...changes.resourceIds);
           if (changes.details?.length) (item.appliedChanges.details ||= []).push(...changes.details);
         }, () => job.cancelled);
+        if (this.platform.verify) {
+          const details = await this.platform.verify(step, item.appliedChanges);
+          if (details.length) (item.appliedChanges.details ||= []).push(...details);
+        }
         item.status = 'succeeded';
         outputs.set(step.stepId, item.outputs);
         if (job.cancelled) status = 'cancelled';

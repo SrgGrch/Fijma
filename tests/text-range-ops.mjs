@@ -52,6 +52,7 @@ assert.deepEqual(text.styles.slice(3), [25,20,20,20,4]);
 const beforeMissing = text.characters;
 const missing = await run(11, replace(3, 4, 'x', { inherit: 'BEFORE', format: { fontName: { family: 'Missing', style: 'Regular' } } }));
 assert.equal(missing.error.code, 'FONT_UNAVAILABLE'); assert.equal(text.characters, beforeMissing);
+assert.deepEqual(missing.error.details, { fonts: [{ family: 'Missing', style: 'Regular' }] });
 const missingFull = await run(12, replace(3, 4, 'x', { format: { ...fullStyle, fontName: { family: 'Missing', style: 'Regular' } } }));
 assert.equal(missingFull.error.code, 'FONT_UNAVAILABLE'); assert.equal(text.characters, beforeMissing);
 const deletedAll = await run(13, replace(0, text.characters.length, '', { inherit: 'BEFORE' }));
