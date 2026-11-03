@@ -15,6 +15,13 @@ const style = resource('styleId'), collection = resource('collectionId'), mode =
 const color = obj({ r: n.min(0).max(1), g: n.min(0).max(1), b: n.min(0).max(1), a: n.min(0).max(1).optional() });
 const point = obj({ x: n, y: n });
 const font = obj({ family: id, style: id });
+const alias = obj({ type: z.literal('VARIABLE_ALIAS'), id });
+const componentLink = obj({ id, key: z.string(), remote: z.boolean() }).nullable();
+const preferredValues = z.array(obj({ type: z.enum(['COMPONENT', 'COMPONENT_SET']), key: id }));
+const componentPropertyType = z.enum(['BOOLEAN', 'TEXT', 'INSTANCE_SWAP', 'VARIANT', 'SLOT']);
+const componentProperties = z.record(id, obj({ type: componentPropertyType, value: z.union([z.string(), z.boolean()]), preferredValues: preferredValues.optional(), boundVariables: obj({ value: alias.optional() }).optional() }));
+const componentPropertyDefinitions = z.record(id, obj({ type: componentPropertyType, defaultValue: z.union([z.string(), z.boolean()]), preferredValues: preferredValues.optional(), variantOptions: z.array(z.string()).optional(), description: z.string().optional(), slotSettings: obj({ stretchChildOnInsert: z.boolean().optional(), displayEmptyByDefault: z.boolean().optional(), minChildren: index.nullable().optional(), maxChildren: index.nullable().optional(), allowPreferredValuesOnly: z.boolean().optional() }).optional(), boundVariables: obj({ defaultValue: alias.optional() }).optional() }));
+const componentFields = { mainComponent: componentLink.optional(), componentSet: componentLink.optional(), componentProperties: componentProperties.optional(), componentPropertyDefinitions: componentPropertyDefinitions.optional(), variantProperties: z.record(id, z.string()).nullable().optional() };
 const stops = z.array(obj({ position: n.min(0).max(1), color })).min(2);
 const paint = z.discriminatedUnion('type', [
   obj({ type: z.literal('SOLID'), color, opacity: n.min(0).max(1).optional(), visible: z.boolean().optional() }),
@@ -52,15 +59,27 @@ const layout = obj({ layoutMode: z.enum(['NONE', 'HORIZONTAL', 'VERTICAL']).opti
 const common = { name: z.string().optional(), x: n.optional(), y: n.optional(), width: positive.optional(), height: positive.optional(), rotation: n.optional(), visible: z.boolean().optional(), locked: z.boolean().optional() };
 const nodeTypes = ['FRAME', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT'] as const;
 const properties = (type: typeof nodeTypes[number]) => obj({ ...common,
-  ...Object.fromEntries(Object.entries(appearanceFields).filter(([key]) => type !== 'LINE' || !key.toLowerCase().includes('radius'))),
+  ...Object.fromEntries(Object.entries(appearanceFields).filter(([key]) => {
+    if (key === 'cornerRadius') return type !== 'LINE' && type !== 'TEXT';
+    if (['topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius'].includes(key)) return type === 'FRAME' || type === 'RECTANGLE';
+    return true;
+  })),
   ...(type === 'TEXT' ? { ...typographyFields, characters: z.string().optional() } : {}),
   ...(type === 'FRAME' ? { layout: layout.optional() } : {}),
   ...(type === 'POLYGON' || type === 'STAR' ? { pointCount: z.number().int().min(3).optional() } : {}),
 });
-const expected = obj({ name: z.string().optional(), parentId: id.optional(), children: strings.optional(), characters: z.string().optional(),
-  ...common, ...appearanceFields, ...typographyFields, fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(), textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
+const expectedFields = { name: z.string().optional(), parentId: id.optional(), children: strings.optional(), characters: z.string().optional(),
+  ...common, ...appearanceFields, ...typographyFields, ...componentFields, fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(), textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
   boundVariables: z.record(id, obj({ type: z.literal('VARIABLE_ALIAS'), id })).optional(),
-}).refine(value => Object.keys(value).length > 0, 'expected must not be empty');
+  description: z.string().optional(), hiddenFromPublishing: z.boolean().optional(),
+  type: z.enum(['PAINT', 'TEXT', 'EFFECT', 'GRID', 'BOOLEAN', 'STRING', 'FLOAT', 'COLOR']).optional(),
+  paints: z.array(paint).optional(), layoutGrids: z.array(obj({ pattern: z.literal('GRID'), sectionSize: positive, color, visible: z.boolean().optional() })).optional(),
+  modes: z.array(obj({ modeId: id, name: z.string() })).optional(),
+  valuesByMode: z.record(id, z.union([z.string(), z.boolean(), n, color, obj({ type: z.literal('VARIABLE_ALIAS'), id })])).optional(),
+  variableIds: strings.optional(), explicitVariableModes: z.record(id, id).optional(),
+};
+const relatedExpected = obj(expectedFields).refine(value => Object.keys(value).length > 0, 'expected must not be empty');
+const expected = obj({ ...expectedFields, related: z.record(id, relatedExpected).optional() }).refine(value => Object.keys(value).length > 0 && (Object.keys(value).some(key => key !== 'related') || Object.keys(value.related ?? {}).length > 0), 'expected must not be empty');
 const base = { stepId: id, expected: expected.optional() };
 const step = (op: string, fields: Record<string, z.ZodType>) => obj({ ...base, op: z.literal(op), ...fields });
 const target = { target: node }, parent = { parent: node };
@@ -69,7 +88,69 @@ const styleProperty = z.enum(['fills', 'strokes', 'text', 'effects', 'layoutGrid
 const grid = obj({ pattern: z.literal('GRID'), sectionSize: positive, color, visible: z.boolean().optional() });
 const styleValue = z.union([obj({ paints: z.array(paint) }), typography, obj({ effects: z.array(effect) }), obj({ layoutGrids: z.array(grid) })]);
 const variableValue = z.union([z.string(), z.boolean(), n, color]);
-const definitions = z.record(id, obj({ type: z.enum(['BOOLEAN', 'TEXT', 'INSTANCE_SWAP', 'VARIANT']), defaultValue: z.union([z.string(), z.boolean()]) }));
+const composedColor = z.union([obj({ color, opacity: alias }), obj({ color: alias, opacity: z.union([n, alias]) })]);
+const readBindings = z.record(id, z.union([alias, z.array(alias), z.record(id, alias)]));
+const sourceColor = z.discriminatedUnion('space', [
+  obj({ space: z.enum(['SRGB', 'DISPLAY_P3']), r: n, g: n, b: n }),
+  obj({ space: z.literal('HSL'), h: n, s: n, l: n }), obj({ space: z.literal('HSB'), h: n, s: n, b: n }),
+  obj({ space: z.literal('OKLAB'), l: n, a: n, b: n }), obj({ space: z.literal('OKLCH'), l: n, c: n, h: n }),
+]);
+const readColor = color.extend({ sourceColor: sourceColor.optional() });
+const blendMode = z.enum(['PASS_THROUGH', 'NORMAL', 'DARKEN', 'MULTIPLY', 'LINEAR_BURN', 'COLOR_BURN', 'LIGHTEN', 'SCREEN', 'LINEAR_DODGE', 'COLOR_DODGE', 'OVERLAY', 'SOFT_LIGHT', 'HARD_LIGHT', 'DIFFERENCE', 'EXCLUSION', 'HUE', 'SATURATION', 'COLOR', 'LUMINOSITY']);
+const transform = z.tuple([z.tuple([n, n, n]), z.tuple([n, n, n])]);
+const readPaintCommon = { visible: z.boolean().optional(), opacity: n.optional(), blendMode: blendMode.optional() };
+const readPaint = z.discriminatedUnion('type', [
+  obj({ type: z.literal('SOLID'), color: readColor, ...readPaintCommon, boundVariables: readBindings.optional() }),
+  obj({ type: z.enum(['GRADIENT_LINEAR', 'GRADIENT_RADIAL', 'GRADIENT_ANGULAR', 'GRADIENT_DIAMOND']), gradientTransform: transform,
+    gradientStops: z.array(obj({ position: n, color: readColor, boundVariables: readBindings.optional() })), ...readPaintCommon }),
+  obj({ type: z.literal('IMAGE'), imageHash: z.string().nullable(), scaleMode: z.enum(['FILL', 'FIT', 'CROP', 'TILE']), imageTransform: transform.optional(),
+    scalingFactor: n.optional(), rotation: n.optional(), filters: obj({ exposure: n.optional(), contrast: n.optional(), saturation: n.optional(), temperature: n.optional(), tint: n.optional(), highlights: n.optional(), shadows: n.optional() }).optional(), ...readPaintCommon }),
+]);
+const readEffect = z.union([
+  obj({ type: z.enum(['DROP_SHADOW', 'INNER_SHADOW']), color: readColor, offset: point, radius: n, spread: n.optional(), visible: z.boolean(), blendMode, showShadowBehindNode: z.boolean().optional(), boundVariables: readBindings.optional() }),
+  obj({ type: z.enum(['LAYER_BLUR', 'BACKGROUND_BLUR']), radius: n, visible: z.boolean(), blurType: z.literal('NORMAL'), boundVariables: readBindings.optional() }),
+  obj({ type: z.enum(['LAYER_BLUR', 'BACKGROUND_BLUR']), radius: n, visible: z.boolean(), blurType: z.literal('PROGRESSIVE'), startRadius: n, startOffset: point, endOffset: point, boundVariables: readBindings.optional() }),
+]);
+const readFont = font.extend({ variationSettings: z.record(z.string().regex(/^[\x20-\x7e]{4}$/), n).optional() });
+const readTypographyFields = { ...typographyFields, fontName: readFont.optional() };
+const textSegment = obj({ start: index, end: index, characters: z.string(), ...readTypographyFields, fills: z.array(readPaint).optional(), textStyleId: z.string().optional(), boundVariables: readBindings.optional() }).refine(v => v.end >= v.start);
+const readGrid = z.discriminatedUnion('pattern', [
+  obj({ pattern: z.literal('GRID'), sectionSize: n, visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
+  obj({ pattern: z.enum(['ROWS', 'COLUMNS']), alignment: z.enum(['MIN', 'MAX', 'STRETCH', 'CENTER']), gutterSize: n, count: n, sectionSize: n.optional(), offset: n.optional(), visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
+]);
+const bindingField = z.enum(['height', 'width', 'characters', 'itemSpacing', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'visible', 'cornerRadius', 'topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight', 'counterAxisSpacing', 'strokeWeight', 'strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight', 'opacity', 'gridRowGap', 'gridColumnGap', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'letterSpacing', 'lineHeight', 'paragraphSpacing', 'paragraphIndent']);
+const matchesVariableType = (type: string, value: unknown) => {
+  if (alias.safeParse(value).success) return true;
+  switch (type) {
+    case 'BOOLEAN': return typeof value === 'boolean';
+    case 'STRING': return typeof value === 'string';
+    case 'FLOAT': return typeof value === 'number' && Number.isFinite(value);
+    case 'COLOR': return color.safeParse(value).success || composedColor.safeParse(value).success;
+    default: return false;
+  }
+};
+const styleMatches = (type: string, value: unknown) => {
+  const field: Record<string, string> = { PAINT: 'paints', EFFECT: 'effects', GRID: 'layoutGrids' };
+  return type === 'TEXT' ? typography.safeParse(value).success : !!value && typeof value === 'object' && field[type] in value;
+};
+export const nodeProjectionSchema = obj({ ...common, width: n.nonnegative().optional(), height: n.nonnegative().optional(), ...appearanceFields, ...readTypographyFields, ...componentFields,
+  fills: z.array(readPaint).optional(), strokes: z.array(readPaint).optional(), effects: z.array(readEffect).optional(), textSegments: z.array(textSegment).optional(),
+  characters: z.string().optional(), parentId: id.nullable().optional(), children: strings.optional(),
+  layout: layout.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(),
+  textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
+  boundVariables: readBindings.optional(), explicitVariableModes: z.record(id, id).optional(),
+});
+const readStyleValue = z.union([obj({ paints: z.array(readPaint) }), obj(readTypographyFields), obj({ effects: z.array(readEffect) }), obj({ layoutGrids: z.array(readGrid) })]);
+export const resourceProjectionSchemas = {
+  components: obj({ name: z.string().optional(), description: z.string().optional(), key: z.string().optional(), remote: z.boolean().optional(), parentId: id.nullable().optional(), ...componentFields }),
+  styles: obj({ name: z.string().optional(), description: z.string().optional(), key: z.string().optional(), remote: z.boolean().optional(), type: styleType.optional(), value: readStyleValue.optional(), boundVariables: readBindings.optional() }).refine(v => !v.type || !v.value || (v.type === 'TEXT' ? obj(readTypographyFields).safeParse(v.value).success : styleMatches(v.type, v.value))),
+  collections: obj({ name: z.string().optional(), modes: z.array(obj({ modeId: id, name: z.string() })).optional(), defaultModeId: id.optional(), variableIds: strings.optional(), remote: z.boolean().optional() }),
+  variables: obj({ name: z.string().optional(), description: z.string().optional(), collectionId: id.optional(), type: z.enum(['BOOLEAN', 'STRING', 'FLOAT', 'COLOR']).optional(), valuesByMode: z.record(id, z.union([variableValue, alias, composedColor])).optional(), hiddenFromPublishing: z.boolean().optional(), remote: z.boolean().optional() }).refine(v => !v.type || !v.valuesByMode || Object.values(v.valuesByMode).every(value => matchesVariableType(v.type!, value))),
+};
+const definitions = z.record(id, z.discriminatedUnion('type', [
+  obj({ type: z.literal('BOOLEAN'), defaultValue: z.boolean() }),
+  obj({ type: z.enum(['TEXT', 'INSTANCE_SWAP', 'VARIANT']), defaultValue: z.string() }),
+]));
 const operations = [
   step('createPage', { name: z.string() }), step('renamePage', { pageId: node, name: z.string() }),
   step('clonePage', { pageId: node, name: z.string().optional() }), step('movePage', { pageId: node, index }), step('deletePage', { pageId: node }),
@@ -96,20 +177,19 @@ const operations = [
   step('updateVariable', { variableId: variable, patch: obj({ name: z.string().optional(), description: z.string().optional(), hiddenFromPublishing: z.boolean().optional() }) }),
   step('deleteVariable', { variableId: variable }), step('setVariableValue', { variableId: variable, modeId: mode, value: variableValue }),
   step('setVariableAlias', { variableId: variable, modeId: mode, targetVariableId: variable }),
-  step('bindVariable', { ...target, property: id, variableId: variable }), step('unbindVariable', { ...target, property: id }), step('setNodeMode', { ...target, collectionId: collection, modeId: mode }),
+  step('bindVariable', { ...target, property: bindingField, variableId: variable }), step('unbindVariable', { ...target, property: bindingField }), step('setNodeMode', { ...target, collectionId: collection, modeId: mode }),
 ];
 export const stepSchema = z.union(operations as [z.ZodType, z.ZodType, ...z.ZodType[]]).superRefine((raw, ctx) => {
   const value = raw as Record<string, any>;
   const mutable = ['target', 'targets', 'pageId', 'styleId', 'variableId', 'collectionId'];
-  const creates = ['createPage', 'createNode', 'createText', 'importImage', 'importSvg', 'createComponent', 'createInstance', 'createStyle', 'createCollection', 'createVariable'];
+  const creates = ['createPage', 'createNode', 'createText', 'importImage', 'importSvg', 'createComponent', 'createInstance', 'createStyle', 'createCollection'];
   if (!creates.includes(value.op) && mutable.some(key => {
     const refs = Array.isArray(value[key]) ? value[key] : [value[key]];
     return refs.some((ref: any) => typeof ref === 'string' || ref && 'nodeId' in ref);
   }) && !value.expected) ctx.addIssue({ code: 'custom', message: 'expected required for existing object' });
   if (value.start !== undefined && value.end < value.start) ctx.addIssue({ code: 'custom', message: 'Invalid text range' });
   if (value.op === 'createStyle') {
-    const keys: Record<string, string> = { PAINT: 'paints', EFFECT: 'effects', GRID: 'layoutGrids' };
-    if (keys[value.type] && !(keys[value.type] in value.value) || value.type === 'TEXT' && !typography.safeParse(value.value).success) {
+    if (!styleMatches(value.type, value.value)) {
       ctx.addIssue({ code: 'custom', message: 'Style value does not match type' });
     }
   }
@@ -119,17 +199,18 @@ export const batchSchema = z.array(stepSchema).min(1).superRefine((steps, ctx) =
 });
 export const operationIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 const scoped = { scope: scopeSchema };
+const resourceInput = (kind: keyof typeof resourceProjectionSchemas) => obj({ ...scoped, kind: z.literal(kind), ids: strings.optional(), fields: z.array(resourceProjectionSchemas[kind].keyof()).min(1), limit: z.number().int().positive(), cursor: id.optional() });
 export const toolInputs = {
   figma_get_context: obj({}),
   figma_get_tree: obj({ ...scoped, rootId: id, depth: index, limit: z.number().int().positive(), cursor: id.optional() }),
   figma_find_nodes: obj({ ...scoped, rootId: id.optional(), document: z.literal(true).optional(), name: z.string().optional(), types: strings.optional(), limit: z.number().int().positive(), cursor: id.optional() }).refine(v => Boolean(v.rootId) !== Boolean(v.document)),
-  figma_get_nodes: obj({ ...scoped, nodeIds: strings.min(1), fields: strings.min(1) }),
-  figma_get_local_resources: obj({ ...scoped, kind: z.enum(['components', 'styles', 'collections', 'variables']), ids: strings.optional(), fields: strings.min(1), limit: z.number().int().positive(), cursor: id.optional() }),
+  figma_get_nodes: obj({ ...scoped, nodeIds: strings.min(1), fields: z.array(nodeProjectionSchema.keyof()).min(1) }),
+  figma_get_local_resources: z.discriminatedUnion('kind', [resourceInput('components'), resourceInput('styles'), resourceInput('collections'), resourceInput('variables')]),
   figma_navigate: obj({ ...scoped, pageId: id.optional(), nodeIds: strings, select: z.boolean(), reveal: z.boolean() }),
   figma_apply_batch: obj({ ...scoped, operationId: operationIdSchema, steps: batchSchema }),
   figma_get_operation: obj({ ...scoped, operationId: operationIdSchema }),
   figma_cancel_operation: obj({ ...scoped, operationId: operationIdSchema }),
   figma_export_node: obj({ ...scoped, nodeId: id, format: z.enum(['PNG', 'SVG']), scale: positive.optional() }),
 };
-export const errorSchema = obj({ code: z.enum(['NOT_CONNECTED', 'AUTH_FAILED', 'SESSION_BUSY', 'PROTOCOL_MISMATCH', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'INVALID_ARGUMENT', 'INVALID_CURSOR', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE', 'CONFLICT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'RESOURCE_LIMIT', 'RESOURCE_EXPIRED', 'WRITE_DISABLED', 'FIGMA_API_ERROR', 'OUTCOME_UNKNOWN']), message: z.string(), failedStep: id.optional(), recoveryAction: z.string() });
+export const errorSchema = obj({ code: z.enum(['NOT_CONNECTED', 'AUTH_FAILED', 'SESSION_BUSY', 'PROTOCOL_MISMATCH', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'INVALID_ARGUMENT', 'INVALID_CURSOR', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE', 'CONFLICT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'RESOURCE_LIMIT', 'RESOURCE_EXPIRED', 'WRITE_DISABLED', 'FIGMA_API_ERROR', 'OUTCOME_UNKNOWN']), message: z.string(), failedStep: id.optional(), details: z.record(z.string(), z.json()).optional(), recoveryAction: z.string() });
 export const toolErrorSchema = obj({ error: errorSchema });

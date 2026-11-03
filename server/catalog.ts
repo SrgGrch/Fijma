@@ -1,7 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import { toolInputs, toolErrorSchema } from '../shared/contracts';
+import type { z } from 'zod';
+import { toolInputs } from '../shared/contracts';
 import { contextSchema, disconnectedContext } from '../shared/context';
 import { treeOutputSchema, searchOutputSchema } from '../shared/tree-result';
+import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema, operationOutputSchema, exportOutputSchema } from '../shared/operation-result';
+
+const outputSchemas = {
+  figma_get_context: contextSchema, figma_get_tree: treeOutputSchema, figma_find_nodes: searchOutputSchema,
+  figma_get_nodes: nodesOutputSchema, figma_get_local_resources: resourcesOutputSchema, figma_navigate: navigateOutputSchema,
+  figma_apply_batch: operationOutputSchema, figma_get_operation: operationOutputSchema, figma_cancel_operation: operationOutputSchema,
+  figma_export_node: exportOutputSchema,
+} satisfies Record<keyof typeof toolInputs, z.ZodType>;
 
 const descriptions: Record<keyof typeof toolInputs, string> = {
   figma_get_context: 'Состояние моста и доступного документа. Не требует сессии.',
@@ -21,7 +30,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
   for (const [name, inputSchema] of Object.entries(toolInputs)) {
     server.registerTool(name, {
       description: descriptions[name as keyof typeof descriptions], inputSchema,
-      outputSchema: name === 'figma_get_context' ? contextSchema : name === 'figma_get_tree' ? treeOutputSchema : name === 'figma_find_nodes' ? searchOutputSchema : toolErrorSchema,
+      outputSchema: outputSchemas[name as keyof typeof outputSchemas],
     }, async args => {
       let output;
       try {
