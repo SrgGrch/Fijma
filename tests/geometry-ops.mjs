@@ -6,7 +6,11 @@ const { geometryOperations } = await load(0), { BatchExecutor } = await load(1),
 const now = Date.now(), hex = now.toString(16).padStart(12, '0');
 const id = n => `${hex.slice(0,8)}-${hex.slice(8)}-7000-8000-${String(n).padStart(12,'0')}`;
 const node = { id: 'n', type: 'FRAME', name: 'box', x: 1, y: 2, width: 10, height: 20, rotation: 0, parent: { id: 'p', layoutMode: 'NONE' }, resize(w,h) { this.width = w; this.height = h; } };
-const api = { async getNodeByIdAsync(key) { return key === 'n' ? node : null; }, hasMissingFont: false };
+const text = { id: 't', type: 'TEXT', x: 0, y: 0, width: 10, height: 20, characters: 'Mixed', hasMissingFont: false,
+  fonts: [{ family: 'Inter', style: 'Regular' }, { family: 'Inter', style: 'Bold' }],
+  getRangeAllFontNames() { return this.fonts; }, resize(w, h) { this.width = w; this.height = h; } };
+const loaded = [];
+const api = { async getNodeByIdAsync(key) { return key === 'n' ? node : key === 't' ? text : null; }, async loadFontAsync(font) { loaded.push(font); if (font.family === 'Missing') throw Error('private error'); }, hasMissingFont: false };
 const ops = geometryOperations(api);
 const executor = new BatchExecutor(new OperationJournal({ dedupTtl: 10000, clockSkew: 10, maxJournalEntries: 20 }), { ...ops, checkScope() {}, commitUndo() {} }, 10);
 const scope = { sessionId: 's', connectionGeneration: 1 };
@@ -32,3 +36,10 @@ console.log('Geometry callbacks: expected, bounds, layout safety and partial ste
 node.boundVariables = { width: { type: 'VARIABLE_ALIAS', id: 'v' } };
 assert.equal((await run(7, { size: { width: 12, height: 12 }, expected: { width: 30 } })).error.code, 'CAPABILITY_UNAVAILABLE');
 assert.equal(node.width, 30);
+const textRun = (n, size) => executor.submit(scope, id(n), [{ stepId: 'text-geometry', op: 'setGeometry', target: { nodeId: 't' }, size, expected: { width: text.width } }], now);
+assert.equal((await textRun(8, { width: 50, height: 60 })).status, 'succeeded');
+assert.deepEqual(loaded, text.fonts); assert.equal(text.width, 50);
+text.fonts = [{ family: 'Missing', style: 'Regular' }]; text.hasMissingFont = true;
+const missing = await textRun(9, { width: 80, height: 90 });
+assert.equal(missing.error.code, 'FONT_UNAVAILABLE'); assert.deepEqual(missing.error.details, { fonts: text.fonts });
+assert.deepEqual([text.width, text.height], [50, 60]); assert.deepEqual(missing.affectedNodeIds, []);
