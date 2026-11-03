@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Диагностика сессии</title></head>
+<body>
+<h2>Диагностика сессии</h2>
+<p id="status" role="status">Подключение к локальному серверу…</p>
+<p id="result">Ожидание ответа main.</p>
+<p>Используйте только тестовый документ: контрольная запись создаёт прямоугольник.</p>
+<label for="old-session">Сессия предыдущего запуска</label>
+<input id="old-session" autocomplete="off">
+<button id="stale" type="button">Проверить старую сессию</button>
+<button id="control" type="button">Создать контрольный прямоугольник</button>
+<p id="write-result" role="status"></p>
+<script>
+const status = document.getElementById('status');
+const result = document.getElementById('result');
+const writeResult = document.getElementById('write-result');
+let currentSession = '';
+const socket = new WebSocket('ws://localhost:55263');
+socket.onopen = () => { status.textContent = 'WebSocket подключён'; };
+socket.onerror = () => { status.textContent = 'Ошибка WebSocket'; };
+socket.onclose = () => { status.textContent = 'WebSocket закрыт'; };
+socket.onmessage = (event) => {
+  try {
+    const message = JSON.parse(event.data);
+    if (message.type === 'probe' && Number.isSafeInteger(message.sequence)) parent.postMessage({ pluginMessage: message }, '*');
+  } catch { status.textContent = 'Некорректное сообщение'; }
+};
+document.getElementById('stale').onclick = () => {
+  const oldSession = document.getElementById('old-session').value.trim();
+  if (!currentSession || !oldSession || oldSession === currentSession) {
+    writeResult.textContent = 'Введите отличный от текущего идентификатор предыдущей сессии.';
+    return;
+  }
+  parent.postMessage({ pluginMessage: { type: 'test-write', session: oldSession } }, '*');
+};
+document.getElementById('control').onclick = () => {
+  if (currentSession) parent.postMessage({ pluginMessage: { type: 'test-write', session: currentSession } }, '*');
+};
+onmessage = (event) => {
+  const message = event.data.pluginMessage;
+  if (message && message.type === 'probe-result' && Number.isSafeInteger(message.sequence) && typeof message.session === 'string' && typeof message.fileKeyAvailable === 'boolean') {
+    currentSession = message.session;
+    result.textContent = `Ответ ${message.sequence}; сессия ${message.session}; fileKey доступен: ${message.fileKeyAvailable}`;
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  } else if (message && message.type === 'write-result') {
+    writeResult.textContent = `Результат записи: ${message.status}`;
+  }
+};
+</script></body></html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Замеры лимитов</title></head><body>
+<h2>Замеры чтения и экспорта</h2>
+<p>Только отдельный тестовый файл. Создаются 5000 прямоугольников во временном фрейме, затем фрейм удаляется. Закрытие плагина может оставить фикстуру.</p>
+<button id="measure">Измерить</button> <button id="stop" disabled>Остановить</button>
+<p id="status" role="status">Ожидание.</p>
+<label for="report">Отчёт</label><textarea id="report" readonly style="width:100%;height:340px"></textarea>
+<script>
+const measure = document.getElementById('measure');
+const stop = document.getElementById('stop');
+let stopAt;
+measure.onclick = () => {
+  stopAt = undefined;
+  measure.disabled = true; stop.disabled = false;
+  document.getElementById('status').textContent = 'Запуск…';
+  parent.postMessage({ pluginMessage: { type: 'measure' } }, '*');
+};
+stop.onclick = () => {
+  stopAt = performance.now(); stop.disabled = true;
+  document.getElementById('status').textContent = 'Ожидание остановки…';
+  parent.postMessage({ pluginMessage: { type: 'stop' } }, '*');
+};
+onmessage = event => {
+  const message = event.data?.pluginMessage;
+  if (!message) return;
+  if (message.type === 'yield' && Number.isSafeInteger(message.id)) {
+    parent.postMessage({ pluginMessage: { type: 'yield', id: message.id } }, '*');
+    return;
+  }
+  if (message.type === 'progress' && stopAt === undefined) document.getElementById('status').textContent = message.action;
+  if (message.type !== 'report') return;
+  const report = message.report;
+  if (stopAt !== undefined) report.uiStopRoundTripMs = performance.now() - stopAt;
+  document.getElementById('report').value = JSON.stringify(report, null, 2);
+  document.getElementById('status').textContent = 'Завершено.';
+  measure.disabled = false; stop.disabled = true;
+};
+</script></body></html>

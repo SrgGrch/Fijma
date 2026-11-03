@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+const built = await build({ entryPoints: ['shared/tree-pager.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { TreePager } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+const limits = { maxDepth: 8, maxNodes: 1000, maxResponseBytes: 262144, chunkSize: 50 };
+const root = { id: 'root', name: 'Root', type: 'FRAME', children: Array.from({ length: 100 }, (_, i) => ({ id: String(i), name: 'Node', type: 'RECTANGLE' })) };
+const scope = { sessionId: 'session', connectionGeneration: 1 };
+const query = { rootId: 'root', depth: 1, limit: 10 };
+const pager = new TreePager(limits, 5, 1000);
+let revision = 0;
+let cursor, ids = [];
+do {
+  const result = await pager.read(root, { ...query, cursor }, scope, () => revision, 0);
+  ids.push(...result.nodes.map(node => node.nodeId)); cursor = result.nextCursor;
+} while (cursor);
+assert.equal(ids.length, 101);
+assert.equal(new Set(ids).size, 101);
+const first = await pager.read(root, query, scope, () => revision, 0);
+await assert.rejects(pager.read(root, { ...query, cursor: first.nextCursor }, { ...scope, sessionId: 'other' }, () => revision, 0), /INVALID_CURSOR/);
+await assert.rejects(pager.read(root, { ...query, cursor: first.nextCursor, limit: 11 }, scope, () => revision, 0), /INVALID_CURSOR/);
+revision++;
+await assert.rejects(pager.read(root, { ...query, cursor: first.nextCursor }, scope, () => revision, 0), /INVALID_CURSOR/);
+await assert.rejects(pager.read(root, { ...query, cursor: first.nextCursor }, scope, () => revision, 1000), /INVALID_CURSOR/);
+await assert.rejects(pager.read(root, { ...query, limit: 100 }, scope, () => revision, 2000, { yieldControl: async () => revision++ }), /INVALID_CURSOR/);
+console.log('Cursor: продолжение без пропусков, scope/query/revision/TTL и изменения во время чтения — OK');

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Диагностика моста</title></head><body>
+<h2>Проверки одним запуском</h2>
+<p>Только тестовый файл. Проверяются локальные ресурсы, чтение 5000 фигур, PNG и автоматическая остановка второго замера. Созданные тестом объекты удаляются; закрытие плагина может оставить их.</p>
+<button id="run">Запустить все проверки</button> <button id="stop" disabled>Остановить</button>
+<p id="status" role="status">Ожидание.</p>
+<label for="report">Общий отчёт</label><textarea id="report" readonly style="width:100%;height:390px"></textarea>
+<script>
+const run = document.getElementById('run');
+const stop = document.getElementById('stop');
+const status = document.getElementById('status');
+const output = document.getElementById('report');
+const phases = [
+  { name: 'resources', suite: 'resources', type: 'probe' },
+  { name: 'limits', suite: 'limits', type: 'measure' },
+  { name: 'stop', suite: 'limits', type: 'measure' },
+];
+let index = -1, reports = {}, stopTimer, stopAt, userStopped = false;
+const send = (suite, type) => parent.postMessage({ pluginMessage: { suite, type } }, '*');
+const requestStop = () => {
+  if (stopAt !== undefined) return;
+  stopAt = performance.now(); stop.disabled = true;
+  send('limits', 'stop');
+};
+const next = () => {
+  clearTimeout(stopTimer); stopTimer = undefined;
+  index++;
+  if (userStopped || index === phases.length) {
+    index = -1; run.disabled = false; stop.disabled = true;
+    status.textContent = userStopped ? 'Остановлено. Отчёт содержит выполненные проверки.' : 'Все проверки завершены.';
+    return;
+  }
+  stopAt = undefined;
+  const phase = phases[index];
+  stop.disabled = phase.suite !== 'limits';
+  status.textContent = phase.name + ': запуск…';
+  send(phase.suite, phase.type);
+};
+run.onclick = () => {
+  if (index !== -1) return;
+  reports = {}; output.value = ''; userStopped = false; run.disabled = true;
+  next();
+};
+stop.onclick = () => { userStopped = true; requestStop(); };
+onmessage = event => {
+  const message = event.data?.pluginMessage;
+  if (message?.type === 'yield' && Number.isSafeInteger(message.id)) {
+    parent.postMessage({ pluginMessage: { type: 'yield', id: message.id } }, '*');
+    return;
+  }
+  if (!message || index === -1) return;
+  const phase = phases[index];
+  if (message.type === 'progress' && typeof message.action === 'string') {
+    status.textContent = phase.name + ': ' + message.action;
+    if (phase.name === 'stop' && stopTimer === undefined) stopTimer = setTimeout(requestStop, 500);
+    return;
+  }
+  if (message.type !== 'report') return;
+  clearTimeout(stopTimer); stopTimer = undefined;
+  reports[phase.name] = message.results ?? message.report;
+  if (stopAt !== undefined) reports[phase.name].uiStopRoundTripMs = performance.now() - stopAt;
+  output.value = JSON.stringify(reports, null, 2);
+  // Let main release its active handler before starting the next suite.
+  setTimeout(next, 0);
+};
+</script></body></html>

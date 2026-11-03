@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+const built = await build({ entryPoints: ['plugin/document.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { loadDocumentRoot } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+const loads = [];
+const page = id => ({ id, type: 'PAGE', async loadAsync() { loads.push(id); }, get children() { throw new Error('Unrequested traversal'); } });
+const first = page('page1'), second = page('page2');
+const selection = [{ id: 'selected' }]; first.selection = selection;
+const node = { id: 'node', type: 'RECTANGLE', parent: second };
+const api = { root: { children: [first, second] }, currentPage: first, getNodeByIdAsync: async id => id === 'node' ? node : null };
+assert.equal((await loadDocumentRoot(api, 'page2')).root, second);
+assert.deepEqual(loads, ['page2']);
+assert.equal((await loadDocumentRoot(api, 'node')).root, node);
+assert.deepEqual(loads, ['page2', 'page2']);
+assert.equal(api.currentPage, first);
+assert.equal(first.selection, selection);
+await assert.rejects(loadDocumentRoot(api, 'missing'), /NODE_NOT_FOUND/);
+console.log('Документ: загрузка только нужной страницы, поддерево, отсутствующий ID и сохранение навигации — OK');

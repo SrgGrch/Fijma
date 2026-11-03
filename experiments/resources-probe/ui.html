@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Локальные ресурсы</title></head><body>
+<h2>Проверка локальных ресурсов</h2>
+<p>Запускайте в отдельном тестовом файле. Проверка создаёт компоненты, экземпляры, четыре вида стилей, коллекцию и переменные, затем удаляет только созданные ею объекты. Существующие ресурсы не изменяются.</p>
+<button id="probe">Проверить</button>
+<p id="status" role="status">Готово к запуску.</p>
+<label for="report">Отчёт (скопируйте целиком)</label>
+<textarea id="report" readonly style="width:100%;height:300px"></textarea>
+<script>
+const button = document.getElementById('probe');
+let timeout;
+button.onclick = () => {
+  button.disabled = true;
+  document.getElementById('status').textContent = 'Проверка…';
+  timeout = setTimeout(() => {
+    document.getElementById('status').textContent += ' Нет ответа 30 секунд. Перезапустите плагин, если проверка не завершится.';
+  }, 30000);
+  parent.postMessage({ pluginMessage: { type: 'probe' } }, '*');
+};
+onmessage = event => {
+  const message = event.data?.pluginMessage;
+  if (!message) return;
+  if (message.type === 'progress' && typeof message.action === 'string') {
+    document.getElementById('status').textContent = 'Проверка: ' + message.action;
+    return;
+  }
+  if (message.type !== 'report' || !Array.isArray(message.results)) return;
+  clearTimeout(timeout);
+  document.getElementById('report').value = JSON.stringify(message.results, null, 2);
+  document.getElementById('status').textContent = 'Проверка завершена. Ошибки API и очистки указаны в отчёте.';
+  button.disabled = false;
+};
+</script></body></html>

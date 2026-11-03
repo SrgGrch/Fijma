@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Проверка экспорта</title></head><body>
+<h2>Проверка экспорта</h2>
+<p>Выделите один небольшой объект в тестовом документе.</p>
+<button id="export">Экспортировать</button>
+<p id="status" role="status">Ожидание экспорта.</p>
+<a id="png" hidden download="figma-probe.png">Скачать PNG</a>
+<a id="svg" hidden download="figma-probe.svg">Скачать SVG</a>
+<script>
+const links = [document.getElementById('png'), document.getElementById('svg')];
+document.getElementById('export').onclick = () => parent.postMessage({ pluginMessage: { type: 'export' } }, '*');
+onmessage = (event) => {
+  const m = event.data.pluginMessage;
+  if (!m) return;
+  if (m.type === 'error') { document.getElementById('status').textContent = m.message; return; }
+  if (m.type !== 'export') return;
+  for (const link of links) if (link.href.startsWith('blob:')) URL.revokeObjectURL(link.href);
+  links[0].href = URL.createObjectURL(new Blob([m.png], { type: 'image/png' }));
+  links[1].href = URL.createObjectURL(new Blob([m.svg], { type: 'image/svg+xml' }));
+  for (const link of links) link.hidden = false;
+  document.getElementById('status').textContent = 'Экспорт готов. Скачайте оба файла.';
+};
+</script></body></html>

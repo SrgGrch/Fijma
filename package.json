@@ -1,0 +1,27 @@
+{
+  "name": "figma-mcp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:plugin",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server/index.js",
+    "build:plugin": "esbuild plugin/main.ts --bundle --target=es2017 --outfile=dist/plugin/main.js && node scripts/copy-plugin.mjs",
+    "start": "node dist/server/index.js",
+    "build:diagnostics": "esbuild experiments/diagnostics/main.ts --bundle --target=es2017 --outfile=experiments/diagnostics/main.js",
+    "test": "npm run build && node tests/contracts.mjs && node tests/protocol.mjs && node tests/pairing.mjs && node tests/plugin-handshake.mjs && node tests/smoke.mjs && node tests/batch-refs.mjs && node tests/operation-journal.mjs && node tests/read-tree.mjs && node tests/diagnostics.mjs && node tests/limits-probe.mjs && node tests/resources-probe.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "1.142.0",
+    "@modelcontextprotocol/client": "2.4.0",
+    "esbuild": "0.28.2"
+  }
+}
