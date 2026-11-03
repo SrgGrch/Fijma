@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { scopeSchema, operationIdSchema, errorSchema } from './contracts';
-import { nodesOutputSchema, resourcesOutputSchema } from './operation-result';
+import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema } from './operation-result';
 
 export const treeDataSchema = z.strictObject({
   nodes: z.array(z.strictObject({ nodeId: z.string(), name: z.string(), type: z.string(), depth: z.number().int().nonnegative() })),
@@ -29,4 +29,7 @@ export const nodesReplySchema = z.strictObject({ type: z.literal('nodesResult'),
 }).refine(value => Boolean(value.data) !== Boolean(value.error));
 export const resourcesReplySchema = z.strictObject({ type: z.literal('resourcesResult'), ...scopeSchema.shape,
   operationId: operationIdSchema, data: resourcesOutputSchema.optional(), error: errorSchema.optional(),
+}).refine(value => Boolean(value.data) !== Boolean(value.error));
+export const navigateReplySchema = z.strictObject({ type: z.literal('navigateResult'), ...scopeSchema.shape,
+  operationId: operationIdSchema, data: navigateOutputSchema.optional(), error: errorSchema.optional(),
 }).refine(value => Boolean(value.data) !== Boolean(value.error));

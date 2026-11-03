@@ -10,64 +10,6 @@
 <p id="status" role="status">Не подключено.</p>
 <p id="document"></p>
 <p id="operation">Текущая операция: нет.</p>
-<script>
-const secret = document.getElementById('secret');
-const connect = document.getElementById('connect');
-const disconnect = document.getElementById('disconnect');
-const status = document.getElementById('status');
-let socket;
-const sendMain = message => parent.postMessage({ pluginMessage: message }, '*');
-const reset = () => {
-  sendMain({ type: 'disconnected' });
-  connect.disabled = false; disconnect.disabled = true;
-  document.getElementById('document').textContent = '';
-};
-connect.onclick = () => {
-  if (socket) return;
-  let token = secret.value.trim(); secret.value = '';
-  if (!/^[0-9a-f]{64}$/.test(token)) { status.textContent = 'Нужен секрет из файла сопряжения.'; return; }
-  const current = new WebSocket('ws://localhost:55263'); socket = current;
-  connect.disabled = true; disconnect.disabled = false;
-  status.textContent = 'Сопряжение…';
-  current.onopen = () => {
-    if (socket === current) current.send(JSON.stringify({ type: 'pair', secret: token }));
-    token = '';
-  };
-  current.onmessage = event => {
-    if (socket !== current) return;
-    try {
-      const message = JSON.parse(event.data);
-      if (message.type === 'paired' && Object.keys(message).length === 1) sendMain({ type: 'hello-request' });
-      else if (message.type === 'welcome') sendMain(message);
-      else if (message.type === 'getContext') sendMain(message);
-      else if (message.type === 'command') sendMain(message);
-      else { status.textContent = 'PROTOCOL_MISMATCH'; current.close(); }
-    } catch { status.textContent = 'Некорректное сообщение моста.'; current.close(); }
-  };
-  current.onerror = () => { if (socket === current) status.textContent = 'Ошибка подключения к локальному мосту.'; };
-  current.onclose = event => {
-    token = '';
-    if (socket !== current) return;
-    socket = undefined; reset();
-    status.textContent = 'Отключено' + (event.reason ? ': ' + event.reason : '.');
-  };
-};
-disconnect.onclick = () => {
-  const current = socket; socket = undefined;
-  if (current) current.close();
-  reset(); status.textContent = 'Отключено пользователем.';
-};
-onmessage = event => {
-  const message = event.data?.pluginMessage;
-  if (message?.type === 'yield' && Number.isSafeInteger(message.id)) {
-    sendMain({ type: 'yield', id: message.id }); return;
-  }
-  if (!message || !socket || socket.readyState !== WebSocket.OPEN) return;
-  if (['hello', 'context', 'treeResult', 'searchResult', 'nodesResult', 'resourcesResult'].includes(message.type)) socket.send(JSON.stringify(message));
-  else if (message.type === 'bound') {
-    status.textContent = message.message;
-    document.getElementById('document').textContent = 'Документ: ' + message.documentLabel;
-  } else if (message.type === 'error') { status.textContent = message.code; socket.close(); }
-};
-</script></body>
+<!-- UI_SCRIPT -->
+</body>
 </html>

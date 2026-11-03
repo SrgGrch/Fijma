@@ -49,7 +49,7 @@ figma.ui.onmessage({ type: 'hello-request', extra: true });
 assert.equal(messages.length, 0);
 console.log('Main: hello, чужая сессия, welcome и отключение — OK');
 
-const html = await readFile('plugin/ui.html', 'utf8');
+const html = await readFile('dist/plugin/ui.html', 'utf8');
 const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
 const sentMain = [], sockets = [];
 class FakeSocket {

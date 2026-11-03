@@ -18,7 +18,7 @@ try {
   const url = diagnostics.match(/Локальный мост: (ws:\/\/[^\r\n]+)/)[1];
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/plugin/main.js', 'utf8');
-  const html = await readFile('plugin/ui.html', 'utf8');
+  const html = await readFile('dist/plugin/ui.html', 'utf8');
   const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document'].map(id => [id, { value: '', textContent: '' }]));
   let invalidate;
   const textNode = { id: '1:1', name: 'Target', type: 'TEXT', visible: false, locked: true };
