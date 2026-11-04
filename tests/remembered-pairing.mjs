@@ -145,6 +145,19 @@ function uiFixture() {
   assert.equal(h.elements['pairing-panel'].hidden, false);
 }
 {
+  const h = uiFixture(); h.fromMain({ type: 'pairing-loaded', secret: token }); h.bind();
+  h.elements.write.checked = true; h.elements.write.onchange();
+  h.fromMain({ type: 'writeState', enabled: true });
+  h.sockets[0].onclose({ reason: '' }); h.fireTimer(); h.bind(undefined, 2);
+  assert.equal(h.messages.at(-1).type, 'setWriteEnabled');
+  assert.equal(h.messages.at(-1).enabled, true, 'transient reconnect restores consent in this plugin run');
+  h.fromMain({ type: 'writeState', enabled: true });
+  h.elements.stop.onclick(); h.fromMain({ type: 'writeState', enabled: false });
+  const restores = h.messages.filter(message => message.type === 'setWriteEnabled' && message.enabled).length;
+  h.sockets[1].onclose({ reason: '' }); h.fireTimer(); h.bind(undefined, 3);
+  assert.equal(h.messages.filter(message => message.type === 'setWriteEnabled' && message.enabled).length, restores, 'Stop revokes consent');
+}
+{
   const h = uiFixture(); h.document.hidden = true; h.fromMain({ type: 'pairing-loaded', secret: token });
   assert.equal(h.sockets.length, 1);
   h.sockets[0].onclose({ reason: '' });

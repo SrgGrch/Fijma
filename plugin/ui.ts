@@ -18,6 +18,7 @@ let retry: ReturnType<typeof setTimeout> | undefined;
 let storagePending = false;
 let ready = false;
 let savingCredential = '';
+let writeGranted = false;
 
 const descriptions: Record<string, string> = {
   AUTH_FAILED: 'Ключ больше не подходит. Введите ключ из файла сопряжения.',
@@ -80,6 +81,7 @@ const controller = createBridgeController({
     element('activity').dataset.active = String(!!operation);
   },
   setWriteState: (enabled, reason) => {
+    if (ready && !enabled) writeGranted = false;
     write.checked = enabled;
     element('write-status').textContent = enabled ? 'Запись включена' : reason === 'CAPABILITY_UNAVAILABLE' ? 'Запись недоступна' : 'Только чтение';
     element('write-help').textContent = enabled ? 'Агент может изменять весь этот документ.' : 'Агент может читать и экспортировать документ.';
@@ -94,8 +96,10 @@ const controller = createBridgeController({
     element('workspace').hidden = false;
     if (!saved) savePairing();
     pairingView();
+    if (writeGranted) controller.setWriteEnabled(true);
   },
   onDisconnect: reason => {
+    if (reason !== 'Disconnected.') writeGranted = false;
     if (reason === 'AUTH_FAILED') {
       automatic = false; credential = ''; savingCredential = ''; saved = false;
       storagePending = true; sendMain({ type: 'pairing-forget' });
@@ -115,17 +119,18 @@ connect.onclick = () => {
 };
 secret.onkeydown = event => { if (event.key === 'Enter' && !connect.disabled) { event.preventDefault(); connect.click(); } };
 resume.onclick = () => { automatic = true; attempt = 0; showError(''); start(); };
-disconnect.onclick = () => { automatic = false; cancelRetry(); controller.disconnect(); };
+disconnect.onclick = () => { writeGranted = false; automatic = false; cancelRetry(); controller.disconnect(); };
 forget.onclick = () => {
+  writeGranted = false;
   automatic = false; cancelRetry(); credential = ''; savingCredential = ''; saved = false;
   controller.disconnect(); storagePending = true; pairingView();
   sendMain({ type: 'pairing-forget' });
   state('offline', 'Сопряжение удаляется', 'Подождите, пока сохранённый ключ будет удалён.');
 };
 // shortcut: this session stays bound to its Figma file while hidden; use an active-tab signal if Figma exposes one.
-window.addEventListener('pagehide', () => { automatic = false; cancelRetry(); controller.disconnect(); });
-write.onchange = () => { if (ready) controller.setWriteEnabled(write.checked); };
-stop.onclick = () => { if (ready) controller.stop(); };
+window.addEventListener('pagehide', () => { writeGranted = false; automatic = false; cancelRetry(); controller.disconnect(); });
+write.onchange = () => { if (ready) { writeGranted = write.checked; controller.setWriteEnabled(write.checked); } };
+stop.onclick = () => { writeGranted = false; if (ready) controller.stop(); };
 onmessage = event => {
   const raw = event.data?.pluginMessage;
   if (typeof raw?.type === 'string' && raw.type.startsWith('pairing-')) {
