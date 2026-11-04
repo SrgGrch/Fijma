@@ -5,10 +5,11 @@ type Changes = { nodeIds: string[]; resourceIds: string[] };
 
 // Verification is bounded: a large affected layout fails explicitly instead of returning a partial snapshot.
 export async function verifyWrite(api: any, step: BatchStep, changes: Changes, previousParents: string[], limits: { maxNodes: number; maxResponseBytes: number; maxBatchSteps: number }, check: () => void, previousGroups: string[] = []) {
-  const direct = new Set(changes.nodeIds);
+  // The imported node's parentId verifies attachment without projecting every sibling in that parent.
+  const direct = new Set(changes.nodeIds.filter(id => step.op !== 'importSvg' || id !== (step.parent as any)?.nodeId));
   const nameOnly = step.op === 'renamePage' || (step.op === 'updateNode' && Object.keys((step.patch ?? {}) as object).every(key => key === 'name'));
   const local = ['createNode', 'updateNode', 'setGeometry', 'importSvg'].includes(step.op);
-  const queue = [...new Set([...changes.nodeIds, ...(nameOnly || local ? [] : previousParents)])];
+  const queue = [...new Set([...(local ? direct : changes.nodeIds), ...(nameOnly || local ? [] : previousParents)])];
   const seen = new Set<string>();
   let resourceCount = 0;
   const result: any[] = [];
