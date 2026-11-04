@@ -66,11 +66,12 @@ try {
   await new Promise(resolve => setTimeout(resolve, 50));
   await start(5);
   assert.equal(token, firstToken, 'server restart preserves the pairing credential');
-  const second = await ready();
+  let second;
+  for (let i = 0; i < 100; i++) { second = await ready(); if (second.writeEnabled) break; await new Promise(resolve => setTimeout(resolve, 10)); }
   const scope = { sessionId: second.sessionId, connectionGeneration: second.connectionGeneration };
   assert.equal(scope.sessionId, oldScope.sessionId);
   assert.ok(scope.connectionGeneration < oldScope.connectionGeneration);
-  assert.equal(second.writeEnabled, false);
+  assert.equal(second.writeEnabled, true, 'same plugin run restores write consent after server restart');
   const known = (await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId } })).structuredContent;
   assert.equal(known.status, 'succeeded', JSON.stringify(known));
   assert.equal(known.connectionGeneration, oldScope.connectionGeneration);
@@ -78,8 +79,6 @@ try {
   assert.equal(cancelled.status, 'succeeded');
   assert.equal(cancelled.connectionGeneration, oldScope.connectionGeneration);
   assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: args })).structuredContent.error.code, 'SESSION_EXPIRED');
-  elements.write.checked = true; elements.write.onchange();
-  for (let i = 0; i < 100; i++) { if ((await ready()).writeEnabled) break; await new Promise(resolve => setTimeout(resolve, 10)); }
   const retry = (await client.callTool({ name: 'figma_apply_batch', arguments: { ...args, scope } })).structuredContent;
   assert.equal(retry.status, 'succeeded', JSON.stringify(retry));
   assert.equal(retry.connectionGeneration, oldScope.connectionGeneration);

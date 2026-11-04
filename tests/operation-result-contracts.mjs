@@ -42,6 +42,9 @@ assert.equal(schemas.resourcesOutputSchema.safeParse({ resources: [{ kind: 'vari
 for (const [type, value] of [['BOOLEAN', 'true'], ['STRING', 3], ['FLOAT', false], ['COLOR', 4]]) assert.equal(schemas.resourcesOutputSchema.safeParse({ resources: [{ kind: 'variables', id: 'v', properties: { type, valuesByMode: { m: value } }, mixed: [], unavailable: [] }], truncated: false }).success, false, type);
 assert.equal(schemas.resourcesOutputSchema.safeParse({ resources: [{ kind: 'variables', id: 'v', properties: { type: 'FLOAT', valuesByMode: { m: { type: 'VARIABLE_ALIAS', id: 'other' }, n: 1 } }, mixed: [], unavailable: [] }], truncated: false }).success, true);
 const png = { sessionId: 's', nodeId: '1:1', bytes: 100, width: 20, height: 10, format: 'PNG', mimeType: 'image/png', uri: 'figma-export:opaque', expiresAt: '2026-11-04T00:00:00Z' };
+const { uri, expiresAt, ...inlinePng } = png;
+assert.equal(schemas.exportOutputSchema.safeParse(inlinePng).success, true);
+assert.equal(schemas.exportOutputSchema.safeParse({ ...inlinePng, data: 'base64' }).success, false);
 assert.equal(schemas.exportOutputSchema.safeParse(png).success, true);
 assert.equal(schemas.exportOutputSchema.safeParse({ ...png, sessionId: undefined }).success, false);
 assert.equal(schemas.exportOutputSchema.safeParse({ ...png, bytes: undefined }).success, false);

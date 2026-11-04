@@ -45,10 +45,25 @@ figma.ui.onmessage(waiting); await pending;
 assert.equal(messages.pop().data.status, 'cancelled'); assert.equal(count, 1);
 await figma.ui.onmessage({ type: 'setWriteEnabled', enabled: true }); messages.pop();
 holdYield = false;
-await figma.ui.onmessage({ ...cmd, operationId: operationId.replace(/1$/, '6'), params: { steps: [{ ...cmd.params.steps[0], name: 'x'.repeat(5000) }] } });
+await figma.ui.onmessage({ ...cmd, operationId: operationId.replace(/1$/, '6'), params: { steps: [{ ...cmd.params.steps[0], name: 'x'.repeat(34000) }] } });
 const oversized = messages.pop().data;
 assert.equal(oversized.status, 'partially_applied'); assert.equal(oversized.error.code, 'RESOURCE_LIMIT');
 assert.equal(oversized.affectedNodeIds.length, 1); assert.ok(!oversized.steps[0].appliedChanges.details);
+const page = { id: 'fixture-page', type: 'PAGE', name: 'Page', parent: figma.root, children: [] };
+const frame = { id: 'fixture-frame', type: 'FRAME', name: 'Frame', parent: page, layoutMode: 'NONE', children: [] };
+page.children.push(frame); nodes.set(page.id, page); nodes.set(frame.id, frame);
+for (let i = 0; i < 30; i++) {
+  const rect = { id: `rect:${i}`, type: 'RECTANGLE', name: 'Original', parent: frame, x: i, y: 0, width: 10, height: 10 };
+  frame.children.push(rect); nodes.set(rect.id, rect);
+}
+const renames = Array.from({ length: 11 }, (_, i) => ({ stepId: `rename${i}`, op: 'updateNode', type: 'RECTANGLE', target: { nodeId: `rect:${i}` }, patch: { name: 'Updated' }, expected: { name: 'Original' } }));
+for (const [suffix, steps] of [['a', renames.slice(0, 1)], ['b', renames.slice(1)]]) {
+  await figma.ui.onmessage({ ...cmd, operationId: operationId.replace(/1$/, suffix), params: { steps } });
+  const reply = messages.pop();
+  assert.equal(reply.data.status, 'succeeded');
+  assert.equal(reply.data.affectedNodeIds.length, steps.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(reply)) <= hello.limits.maxMessageBytes);
+}
 let yields = 0, secondYield;
 const post = figma.ui.postMessage;
 figma.ui.postMessage = m => { if (m.type === 'yield' && ++yields === 2) secondYield = m; else post(m); };
@@ -63,7 +78,7 @@ const stoppedResults = messages.filter(m => m.type === 'operationResult' && ['8'
 assert.equal(stoppedResults.length, 2);
 assert.equal(stoppedResults[0].status, 'cancelled'); assert.equal(stoppedResults[0].affectedNodeIds.length, 1);
 assert.equal(stoppedResults[1].status, 'cancelled'); assert.equal(stoppedResults[1].affectedNodeIds.length, 0);
-assert.equal(count, 3); assert.equal(undos, 3);
+assert.equal(count, 3); assert.equal(undos, 5);
 messages.length = 0; figma.ui.postMessage = post;
 await figma.ui.onmessage({ type: 'setWriteEnabled', enabled: true }); messages.pop();
 holdRead = true;
@@ -74,5 +89,5 @@ await changedDocument;
 const changedResult = messages.pop().data;
 assert.equal(changedResult.status, 'partially_applied');
 assert.equal(changedResult.error.code, 'DOCUMENT_MISMATCH');
-assert.equal(changedResult.affectedNodeIds.length, 1); assert.equal(undos, 3);
+assert.equal(changedResult.affectedNodeIds.length, 1); assert.equal(undos, 5);
 console.log('Candidate fakeFigma: gated writes, readback, dedup, stop OK');

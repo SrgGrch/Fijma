@@ -37,4 +37,80 @@ const stylesApi = { ...api, getLocalPaintStylesAsync: async () => [{ id: 's1', n
   getLocalTextStylesAsync: async () => [], getLocalEffectStylesAsync: async () => [], getLocalGridStylesAsync: async () => [] };
 const styles = await pager.read(stylesApi, { kind: 'styles', fields: ['name', 'type', 'value'], limit: 5 }, scope, 0, () => revision, async () => {}, async () => {});
 assert.equal(styles.resources[0].properties.value.paints[0].color.r, 1);
-console.log('Локальные ресурсы: значения, aliases, компоненты, cursor и ограничение состояния — OK');
+
+// A catalogue may be larger than the wire limit; only the requested page is projected.
+let conversions = 0;
+const many = Array.from({ length: 700 }, (_, i) => ({ id: `v${i}`, name: `Variable ${i}`, resolvedType: 'FLOAT',
+  variableCollectionId: 'c', valuesByMode: { m: i }, get description() { return { toJSON() { conversions++; return 'description'; } }; } }));
+const largeApi = { ...api, variables: { getLocalVariablesAsync: async () => many } };
+const largePager = new ResourcePager({ ...limits, maxMessageBytes: 4096 });
+const largeQuery = { kind: 'variables', fields: ['name'], limit: 1 };
+const largeRead = query => largePager.read(largeApi, query, scope, 0, () => '0', async () => {}, async () => {});
+const largeFirst = await largeRead(largeQuery);
+assert.equal(largeFirst.resources[0].id, 'v0');
+assert.equal(conversions, 0); // Unrequested fields are neither fingerprinted nor projected.
+const valueQuery = { ...largeQuery, fields: ['valuesByMode'] };
+const valueFirst = await largeRead(valueQuery);
+many[699].valuesByMode.m = 999;
+await assert.rejects(largeRead({ ...valueQuery, cursor: valueFirst.nextCursor }), /INVALID_CURSOR/);
+assert.equal((await largeRead({ ...largeQuery, cursor: largeFirst.nextCursor })).resources[0].id, 'v1');
+
+const componentNodes = Array.from({ length: 100 }, (_, i) => ({ id: `component${i}`, name: `Component ${i}`, type: 'COMPONENT', remote: false }));
+const componentMap = new Map(componentNodes.map(node => [node.id, node]));
+let lookups = 0, pageLoads = 0;
+const manyApi = { ...api, root: { children: [{ id: 'page', name: 'Page', type: 'PAGE', children: componentNodes }] },
+  getNodeByIdAsync: async id => { lookups++; return componentMap.get(id) ?? null; } };
+const manyPager = new ResourcePager({ ...limits, maxNodes: 150, maxResponseBytes: 4000 });
+const componentQuery = { kind: 'components', fields: ['name'], limit: 100 };
+const manyRead = query => manyPager.read(manyApi, query, scope, 0, () => '0', async () => { pageLoads++; }, async () => {});
+let calls = 1;
+let result = await manyRead(componentQuery);
+const seen = [...result.resources.map(row => row.id)];
+while (result.nextCursor) { calls++; result = await manyRead({ ...componentQuery, cursor: result.nextCursor }); seen.push(...result.resources.map(row => row.id)); }
+assert.deepEqual(seen, componentNodes.map(node => node.id));
+assert.ok(lookups <= 102);
+assert.ok(calls <= 6, `unexpected call count: ${calls}`);
+assert.equal(pageLoads, 1);
+lookups = 0; pageLoads = 0;
+const byId = await manyRead({ ...componentQuery, ids: ['component99'] });
+assert.deepEqual(byId.resources.map(row => row.id), ['component99']);
+assert.equal(lookups, 1);
+assert.equal(pageLoads, 0);
+componentMap.set('remote', { id: 'remote', type: 'COMPONENT', remote: true });
+componentMap.set('frame', { id: 'frame', type: 'FRAME', remote: false });
+const filteredIds = await manyRead({ ...componentQuery, ids: ['remote', 'frame', 'missing', 'component99'] });
+assert.deepEqual(filteredIds.resources.map(row => row.id), ['component99']);
+
+
+
+
+const spaciousPager = new ResourcePager({ ...limits, maxNodes: 150, maxResponseBytes: 40000, maxMessageBytes: 40000 });
+let yields = 0;
+const spacious = await spaciousPager.read(manyApi, componentQuery, scope, 0, () => '0', async () => {}, async () => { yields++; });
+assert.equal(spacious.resources.length, 100);
+assert.ok(yields >= 3); // Two search yields and one while projecting the page.
+
+const timedNodes = componentNodes.map(node => ({ ...node, description: 'x'.repeat(400) }));
+const timedMap = new Map(timedNodes.map(node => [node.id, node]));
+const timedApi = { ...manyApi, root: { children: [{ id: 'page', name: 'Page', type: 'PAGE', children: timedNodes }] },
+  getNodeByIdAsync: async id => timedMap.get(id) ?? null };
+const timedPager = new ResourcePager({ ...limits, maxNodes: 150, maxResponseBytes: 4000 });
+const timedQuery = { ...componentQuery, fields: ['name', 'description'] };
+let now = 0, timedRevision = '0';
+const timedRead = query => timedPager.read(timedApi, query, scope, now, () => timedRevision, async () => {}, async () => {});
+let timed = await timedRead(timedQuery);
+const timedSeen = [...timed.resources.map(row => row.id)];
+while (timed.nextCursor) {
+  now += 900;
+  timed = await timedRead({ ...timedQuery, cursor: timed.nextCursor });
+  timedSeen.push(...timed.resources.map(row => row.id));
+}
+assert.ok(now > limits.resourceTtl * 3);
+assert.deepEqual(timedSeen, timedNodes.map(node => node.id));
+const expiring = await timedRead(timedQuery);
+now += limits.resourceTtl;
+await assert.rejects(timedRead({ ...timedQuery, cursor: expiring.nextCursor }), /INVALID_CURSOR/);
+const changing = await timedRead(timedQuery);
+timedRevision = '1';
+await assert.rejects(timedRead({ ...timedQuery, cursor: changing.nextCursor }), /INVALID_CURSOR/);
+console.log('Resource pagination and lookup: OK');

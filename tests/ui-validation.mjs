@@ -32,7 +32,7 @@ function setup(initiallyHidden = false) {
   elements.secret.value = 'a'.repeat(64); elements.connect.onclick();
   const socket = sockets[0]; if (socket) socket.onopen();
   const server = value => socket.onmessage({ data: JSON.stringify(value) });
-  const main = value => ui.onmessage({ data: { pluginMessage: value } });
+  const main = value => ui.onmessage({ source: ui, data: { pluginMessage: value } });
   return { socket, sockets, sentMain, server, main, elements, document, listeners, windowListeners };
 }
 function paired() { const h = setup(); h.server({ type: 'paired' }); return h; }
@@ -108,11 +108,13 @@ for (const reason of ['SESSION_BUSY', 'AUTH_FAILED', 'PROTOCOL_MISMATCH', 'priva
   assert.equal(h.elements.connection.dataset.state, reason === 'private payload' ? 'waiting' : 'error');
 }
 {
-  const h = ready(); h.elements.write.checked = true; h.document.hidden = true; h.listeners.visibilitychange();
-  assert.equal(h.socket.readyState, 3); assert.equal(h.sentMain.at(-1).type, 'disconnected'); assert.equal(h.elements.write.checked, false);
-  const count = h.sockets.length; h.elements.secret.value = 'a'.repeat(64); h.elements.connect.onclick(); assert.equal(h.sockets.length, count); assert.equal(h.elements.secret.value, '');
+  const h = ready(); h.elements.write.checked = true; h.elements.write.onchange();
+  h.main({ type: 'writeState', enabled: true }); h.document.hidden = true; h.listeners.visibilitychange?.();
+  assert.equal(h.socket.readyState, 1); assert.equal(h.sockets.length, 1);
+  assert.equal(h.elements.write.checked, true);
+  assert.equal(h.sentMain.at(-1).type, 'setWriteEnabled');
 }
-{ const h = setup(true); assert.equal(h.sockets.length, 0); }
+{ const h = setup(true); assert.equal(h.sockets.length, 1); }
 { const h = ready(); h.windowListeners.pagehide(); assert.equal(h.socket.readyState, 3); assert.equal(h.sentMain.at(-1).type, 'disconnected'); }
 {
   const h = setup(), capabilities = [...hello.capabilities, 'applyBatch', 'getOperation', 'cancel', 'exportNode'];

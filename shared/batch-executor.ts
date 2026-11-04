@@ -15,7 +15,7 @@ type Platform = {
   prepare(step: BatchStep, original?: BatchStep, guard?: () => void): Promise<void>;
   readExpected(step: BatchStep): Promise<Record<string, unknown>>;
   execute(step: BatchStep, record: (changes: Changes) => void, cancelled: () => boolean): Promise<Outputs>;
-  verify?(step: BatchStep, changes: Changes): Promise<unknown[]>;
+  verify?(step: BatchStep, changes: Changes, stepCount: number): Promise<unknown[]>;
   commitUndo(): void;
 };
 const empty = (): Changes => ({ nodeIds: [], resourceIds: [] });
@@ -115,7 +115,7 @@ export class BatchExecutor {
           if (changes.details?.length) (item.appliedChanges.details ||= []).push(...changes.details);
         }, () => job.cancelled);
         if (this.platform.verify) {
-          const details = await this.platform.verify(step, item.appliedChanges);
+          const details = await this.platform.verify(step, item.appliedChanges, steps.length);
           if (details.length) (item.appliedChanges.details ||= []).push(...details);
         }
         item.status = 'succeeded';
