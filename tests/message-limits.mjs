@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
-const built = await build({ entryPoints:['shared/protocol.ts','plugin/candidate.ts'], bundle:true, format:'esm', target:'es2017', outdir:'out', write:false });
+const built = await build({ entryPoints:['shared/protocol.ts','plugin/main.ts'], bundle:true, format:'esm', target:'es2017', outdir:'out', write:false });
 const protocol = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
 for (const value of ['', 'ASCII', '汉字', 'a😀b', '\ud800', '\udc00', '\ud800x', '\u0000']) {
   assert.equal(protocol.utf8Bytes(value), Buffer.byteLength(value));
