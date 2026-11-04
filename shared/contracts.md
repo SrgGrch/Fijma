@@ -2,6 +2,8 @@
 
 Источник схем — `contracts.ts`, `operation-result.ts`, `context.ts` и `tree-result.ts`. Объекты строгие: неизвестные поля и команды отклоняются. Проверка схемы не заменяет проверку живого документа, прав, доступности API, шрифтов, совместимости типов и связей непосредственно перед записью.
 
+Входная JSON Schema `figma_apply_batch` публикуется с общими `$defs` и локальными `$ref`; клиент должен поддерживать такие ссылки. Проверка входа сохраняет исходные Zod refinements, включая уникальность stepId и предусловия существующих объектов. В локальном SDK-замере каталог занимает 175 288 байт вместо 6 719 128; это объём JSON, не измерение оплачиваемых токенов модели.
+
 ## Инструменты
 
 Все инструменты документа принимают `scope: {sessionId, connectionGeneration}`. `figma_get_context` не требует scope. Ошибка инструмента: `{error:{code,message,failedStep?,details?,recoveryAction}}`; `details` не должен содержать секреты.
@@ -17,7 +19,7 @@
 | figma_apply_batch | operationId, steps | результат операции |
 | figma_get_operation | operationId | известный результат или состояние unknown |
 | figma_cancel_operation | operationId | известное состояние; отмена не обещает откат |
-| figma_export_node | nodeId, format PNG/SVG, scale? | sessionId, nodeId, bytes, format, mimeType и PNG data либо uri с expiresAt; PNG также содержит width и height |
+| figma_export_node | nodeId, format PNG/SVG, scale? | sessionId, nodeId, bytes, format, mimeType и PNG image block либо uri с expiresAt; PNG также содержит width и height |
 
 Примеры: `figma_get_tree({scope:{sessionId:"s",connectionGeneration:1},rootId:"0:1",depth:2,limit:100})`; `figma_find_nodes({scope:{sessionId:"s",connectionGeneration:1},document:true,name:"Button",limit:50})`; `figma_get_nodes({scope:{sessionId:"s",connectionGeneration:1},nodeIds:["1:1"],fields:["name","characters"]})`.
 
@@ -33,6 +35,8 @@
 Проекции узлов и components также предоставляют `mainComponent` и `componentSet` как `{id,key,remote}` или null, `componentProperties` и `componentPropertyDefinitions` как словари по полному имени свойства, `variantProperties` как словарь строк или null. У свойств доступны type, value или defaultValue, preferredValues и boundVariables; у определений также variantOptions, description и slotSettings. Эти же поля можно задавать в `expected` и `expected.related`, чтобы проверять состояние компонента и его связей перед записью.
 
 Например, `{resources:[{kind:"variables",id:"v",properties:{valuesByMode:{dark:{type:"VARIABLE_ALIAS",id:"other"}}},mixed:[],unavailable:[]}],truncated:false}`. Запрошенные fields ограничены полями соответствующего kind и задают проекцию, а не путь присваивания.
+
+Пагинация ресурсов проецирует только выдаваемую страницу. Для стилей, коллекций и переменных каждое продолжение сканирует запрошенные поля каталога и сравнивает компактный некриптографический fingerprint; полный JSON каталога в cursor не хранится. Изменение запрошенного значения инвалидирует cursor, изменение незапрошенного поля само по себе — нет. Компоненты по известным ids читаются напрямую с проверкой типа и локальности; поиск без ids выдаёт несколько компонентов за вызов с сохранением не вместившихся строк для продолжения. Размер страницы ограничен limit и байтовым бюджетом, а обход — maxNodes; даже пустой ответ с nextCursor требует продолжения.
 
 Read-схемы отделены от write: они сохраняют нулевые размеры, nullable imageHash, массивы и вложенные коллекции привязок, вариации шрифта, свойства image/gradient и shadow/blur. Поддерживаются SOLID, GRADIENT и IMAGE; для иных paint/effect либо не представимого в JSON значения всё запрошенное поле помечается unavailable, без частичной подмены. Эти read-значения не расширяют разрешённые значения записи.
 

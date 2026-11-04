@@ -56,6 +56,11 @@ export class SearchPager {
       !Number.isSafeInteger(ttl) || ttl < 1) throw new Error('INVALID_ARGUMENT');
   }
   clear() { this.cursors.clear(); }
+  extendCursor(cursor: string, now: number) {
+    const state = this.cursors.get(cursor);
+    if (!state || state.expires <= now) throw new Error('INVALID_CURSOR');
+    state.expires = now + this.ttl;
+  }
   checkCursor(query: SearchQuery, scope: Scope, now: number) {
     if (!query.cursor) return;
     const stored = this.cursors.get(query.cursor);

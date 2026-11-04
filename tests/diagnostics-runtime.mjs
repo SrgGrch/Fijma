@@ -62,7 +62,7 @@ for (const enabled of [false, true]) {
     assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.documentLabel, text);
     assert.equal((await client.callTool({ name: 'figma_get_nodes', arguments: { scope, nodeIds: ['1:1'], fields: ['characters'] } })).structuredContent.nodes[0].properties.characters, text);
     const exported = await client.callTool({ name: 'figma_export_node', arguments: { scope, nodeId: '1:1', format: 'PNG' } });
-    assert.deepEqual(Buffer.from(exported.structuredContent.data, 'base64'), bytes);
+    assert.deepEqual(Buffer.from(exported.content.find(item => item.type === 'image').data, 'base64'), bytes);
     const failure = await client.callTool({ name: 'figma_get_nodes', arguments: { scope, nodeIds: ['missing'], fields: ['name'] } });
     assert.equal(failure.isError, true);
     assert.equal(failure.structuredContent.error.code, 'NODE_NOT_FOUND');

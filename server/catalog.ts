@@ -1,9 +1,9 @@
 import { McpServer, ResourceTemplate, ProtocolError } from '@modelcontextprotocol/server';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { toolInputs } from '../shared/contracts';
 import { contextSchema, disconnectedContext } from '../shared/context';
 import { treeOutputSchema, searchOutputSchema } from '../shared/tree-result';
-import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema, operationOutputSchema, exportOutputSchema } from '../shared/operation-result';
+import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema, operationOutputSchema, exportOutputSchema, inlinePngTransferSchema } from '../shared/operation-result';
 
 const outputSchemas = {
   figma_get_context: contextSchema, figma_get_tree: treeOutputSchema, figma_find_nodes: searchOutputSchema,
@@ -38,11 +38,15 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
       } catch { throw new ProtocolError(-32602, 'RESOURCE_EXPIRED: повторите экспорт.'); }
     });
   for (const [name, inputSchema] of Object.entries(toolInputs)) {
+    const publishedInput = name === 'figma_apply_batch' ? {
+      '~standard': { ...inputSchema['~standard'], jsonSchema: { ...inputSchema['~standard'].jsonSchema,
+        input: () => z.toJSONSchema(inputSchema, { io: 'input', reused: 'ref' }) } },
+    } : inputSchema;
     server.registerTool(name, {
-      description: descriptions[name as keyof typeof descriptions], inputSchema,
+      description: descriptions[name as keyof typeof descriptions], inputSchema: publishedInput,
       outputSchema: outputSchemas[name as keyof typeof outputSchemas],
     }, async args => {
-      let output;
+      let output, imageData: string | undefined;
       try {
         if (name === 'figma_get_context') output = contextSchema.parse(await getContext());
         else if (name === 'figma_get_tree' && getTree) output = treeOutputSchema.parse(await getTree(args));
@@ -50,7 +54,14 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         else if (name === 'figma_get_nodes' && getNodes) output = nodesOutputSchema.parse(await getNodes(args));
         else if (name === 'figma_get_local_resources' && getLocalResources) output = resourcesOutputSchema.parse(await getLocalResources(args));
         else if (name === 'figma_navigate' && navigate) output = navigateOutputSchema.parse(await navigate(args));
-        else if (name === 'figma_export_node' && exportNode) output = exportOutputSchema.parse(await exportNode(args));
+        else if (name === 'figma_export_node' && exportNode) {
+          const result = await exportNode(args);
+          if (result && typeof result === 'object' && 'data' in result) {
+            const { data, ...metadata } = inlinePngTransferSchema.parse(result);
+            imageData = data;
+            output = exportOutputSchema.parse(metadata);
+          } else output = exportOutputSchema.parse(result);
+        }
         else if (name === 'figma_apply_batch' && applyBatch) output = operationOutputSchema.parse(await applyBatch(args));
         else if (name === 'figma_get_operation' && getOperation) output = operationOutputSchema.parse(await getOperation(args));
         else if (name === 'figma_cancel_operation' && cancelOperation) output = operationOutputSchema.parse(await cancelOperation(args));
@@ -67,7 +78,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
       if (name === 'figma_export_node' && !('error' in output)) {
-        if (output.format === 'PNG' && 'data' in output) content.push({ type: 'image', mimeType: 'image/png', data: output.data });
+        if (imageData) content.push({ type: 'image', mimeType: 'image/png', data: imageData });
         else if ('uri' in output) content.push({ type: 'resource_link', uri: output.uri, name: 'Figma export', mimeType: output.mimeType });
       }
       return { structuredContent: output, content,

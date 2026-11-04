@@ -45,8 +45,8 @@ const executor = new BatchExecutor(new OperationJournal(bootstrapLimits), {
     }
   },
   checkScope(scope) { checkDocument(); if (scope.sessionId !== sessionId || scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); if (!writeEnabled) throw new Error('WRITE_DISABLED'); },
-  async verify(step, changes) {
-    return verifyWrite(figma, step, changes, previousParents, limits, checkDocument, previousGroups);
+  async verify(step, changes, stepCount) {
+    return verifyWrite(figma, step, changes, previousParents, { ...limits, maxBatchSteps: stepCount }, checkDocument, previousGroups);
   },
   commitUndo() { checkDocument(); figma.commitUndo(); },
 }, bootstrapLimits.maxQueuedOperations);

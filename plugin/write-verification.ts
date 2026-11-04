@@ -6,7 +6,8 @@ type Changes = { nodeIds: string[]; resourceIds: string[] };
 // Verification is bounded: a large affected layout fails explicitly instead of returning a partial snapshot.
 export async function verifyWrite(api: any, step: BatchStep, changes: Changes, previousParents: string[], limits: { maxNodes: number; maxResponseBytes: number; maxBatchSteps: number }, check: () => void, previousGroups: string[] = []) {
   const direct = new Set(changes.nodeIds);
-  const queue = [...new Set([...changes.nodeIds, ...previousParents])];
+  const nameOnly = step.op === 'renamePage' || (step.op === 'updateNode' && Object.keys((step.patch ?? {}) as object).every(key => key === 'name'));
+  const queue = [...new Set([...changes.nodeIds, ...(nameOnly ? [] : previousParents)])];
   const seen = new Set<string>();
   let resourceCount = 0;
   const result: any[] = [];
@@ -85,8 +86,8 @@ export async function verifyWrite(api: any, step: BatchStep, changes: Changes, p
       properties.mainComponent = main ? { id: main.id, key: main.key, remote: main.remote } : null;
     }
     properties.parentId = node.parent?.id ?? null;
-    if ('children' in node) properties.children = node.children.map((child: any) => child.id);
-    if (node.type === 'TEXT' && direct.has(id)) {
+    if (!nameOnly && 'children' in node) properties.children = node.children.map((child: any) => child.id);
+    if (!nameOnly && node.type === 'TEXT' && direct.has(id)) {
       properties.characters = node.characters;
       if (node.characters.length) {
         if (typeof node.getStyledTextSegments !== 'function') throw new Error('FIGMA_API_ERROR');
@@ -97,8 +98,8 @@ export async function verifyWrite(api: any, step: BatchStep, changes: Changes, p
       }
     }
     result.push({ nodeId: id, properties });
-    if (node.parent?.id) queue.push(node.parent.id);
-    if (node.type !== 'PAGE' && node.type !== 'DOCUMENT' && 'children' in node) for (const child of node.children) queue.push(child.id);
+    if (!nameOnly && node.parent?.id) queue.push(node.parent.id);
+    if (!nameOnly && node.type !== 'PAGE' && node.type !== 'DOCUMENT' && 'children' in node) for (const child of node.children) queue.push(child.id);
     if (!changes.nodeIds.includes(id)) changes.nodeIds.push(id);
     if (encodeURI(JSON.stringify(result)).replace(/%[A-F\d]{2}/g, 'x').length > Math.floor(limits.maxResponseBytes / limits.maxBatchSteps)) throw new Error('RESOURCE_LIMIT');
   }

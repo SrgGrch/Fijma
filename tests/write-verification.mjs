@@ -22,6 +22,24 @@ assert.equal(details.find(x => x.nodeId === 'sibling').properties.x, 30);
 assert.deepEqual(details.find(x => x.nodeId === 'frame').properties.children, ['node', 'sibling']);
 assert.deepEqual(details.find(x => x.nodeId === 'node').properties.parentId, 'frame');
 assert.ok(changes.nodeIds.includes('sibling'));
+const largeFrame = { id: 'large', type: 'FRAME', name: 'Large', parent: page, layoutMode: 'NONE', children: [] };
+nodes.set(largeFrame.id, largeFrame);
+for (let i = 0; i < 30; i++) {
+  const child = { id: `rect:${i}`, type: 'RECTANGLE', name: 'Rectangle', parent: largeFrame, x: i, y: 0, width: 10, height: 10 };
+  largeFrame.children.push(child); nodes.set(child.id, child);
+}
+const rename = { stepId: 'rename', op: 'updateNode', type: 'RECTANGLE', target: { nodeId: 'rect:0' }, patch: { name: 'Renamed' }, expected: { name: 'Rectangle' } };
+largeFrame.children[0].name = 'Renamed';
+const renameChanges = { nodeIds: ['rect:0'], resourceIds: [] };
+const renameDetails = await verifyWrite(api, rename, renameChanges, ['large', 'page', 'root'], { ...limits, maxResponseBytes: 32768, maxBatchSteps: 1 }, () => {});
+assert.deepEqual(renameChanges.nodeIds, ['rect:0']);
+assert.deepEqual(renameDetails.map(row => row.nodeId), ['rect:0']);
+assert.equal(renameDetails[0].properties.name, 'Renamed');
+const longText = { id: 'long-text', type: 'TEXT', name: 'Renamed', parent: largeFrame, characters: 'x'.repeat(50000), getStyledTextSegments() { throw Error('unrelated text read'); } };
+nodes.set(longText.id, longText);
+const textRename = await verifyWrite(api, { ...rename, type: 'TEXT', target: { nodeId: longText.id } }, { nodeIds: [longText.id], resourceIds: [] }, ['large'], { ...limits, maxResponseBytes: 32768, maxBatchSteps: 1 }, () => {});
+assert.equal(textRename[0].properties.name, 'Renamed');
+assert.equal(textRename[0].properties.characters, undefined);
 const removed = await verifyWrite(api, { op: 'ungroupNode' }, { nodeIds: ['missing'], resourceIds: [] }, [], limits, () => {});
 assert.deepEqual(removed, [{ nodeId: 'missing', deleted: true }]);
 await assert.rejects(verifyWrite(api, step, { nodeIds: ['missing'], resourceIds: [] }, [], limits, () => {}), /FIGMA_API_ERROR/);
@@ -88,4 +106,14 @@ const op = `${hex.slice(0, 8)}-${hex.slice(8)}-7000-8000-000000000001`;
 const result = await executor.submit({ sessionId: 's', connectionGeneration: 1 }, op, [step], now);
 assert.equal(result.status, 'partially_applied'); assert.equal(result.error.code, 'FIGMA_API_ERROR');
 assert.ok(result.affectedNodeIds.includes('node')); assert.equal(width, 35);
+fail = false;
+const budgetExecutor = new BatchExecutor(new OperationJournal({ dedupTtl: 10000, clockSkew: 100, maxJournalEntries: 10 }), {
+  checkScope() {}, async prepare() {}, async readExpected() { return { name: 'Rectangle' }; },
+  async execute(s, record) { record({ nodeIds: [s.target.nodeId], resourceIds: [] }); return {}; },
+  async verify(s, c, count) { return verifyWrite(api, s, c, ['large'], { ...limits, maxResponseBytes: 32768, maxBatchSteps: count }, () => {}); }, commitUndo() {},
+}, 1);
+const batch = await budgetExecutor.submit({ sessionId: 's', connectionGeneration: 1 }, op.replace(/1$/, '2'), [rename, { ...rename, stepId: 'rename2', target: { nodeId: 'rect:1' } }], now);
+assert.equal(batch.status, 'succeeded');
+assert.deepEqual(batch.affectedNodeIds, ['rect:0', 'rect:1']);
+assert.ok(Buffer.byteLength(JSON.stringify(batch)) <= 32768);
 console.log('Write verification: actual layout, affected IDs, deletion and failed readback OK');
