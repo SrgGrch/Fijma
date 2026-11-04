@@ -132,7 +132,6 @@ window.addEventListener('pagehide', () => { automatic = false; cancelRetry(); co
 write.onchange = () => { if (ready) controller.setWriteEnabled(write.checked); };
 stop.onclick = () => { if (ready) controller.stop(); };
 onmessage = event => {
-  if (event.source && event.source !== parent) return;
   const raw = event.data?.pluginMessage;
   if (typeof raw?.type === 'string' && raw.type.startsWith('pairing-')) {
     const parsed = pairingReplySchema.safeParse(raw);

@@ -32,7 +32,7 @@ function setup(initiallyHidden = false) {
   elements.secret.value = 'a'.repeat(64); elements.connect.onclick();
   const socket = sockets[0]; if (socket) socket.onopen();
   const server = value => socket.onmessage({ data: JSON.stringify(value) });
-  const main = value => ui.onmessage({ data: { pluginMessage: value } });
+  const main = value => ui.onmessage({ source: ui, data: { pluginMessage: value } });
   return { socket, sockets, sentMain, server, main, elements, document, listeners, windowListeners };
 }
 function paired() { const h = setup(); h.server({ type: 'paired' }); return h; }
