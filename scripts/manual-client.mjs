@@ -24,9 +24,9 @@ function isToolRequest(request) {
 }
 async function callTool(request) {
   const result = await client.callTool({ name: request.name, arguments: request.arguments });
-  if (request.name === 'figma_export_node' && result.structuredContent?.data) {
-    const { data, ...metadata } = result.structuredContent;
-    result.structuredContent = { ...metadata, file: await save(data, metadata.mimeType) };
+  const image = request.name === 'figma_export_node' && result.content.find(item => item.type === 'image');
+  if (image) {
+    result.structuredContent = { ...result.structuredContent, file: await save(image.data, image.mimeType) };
     result.content = result.content.filter(item => item.type !== 'image' && item.type !== 'text');
   }
   return result;

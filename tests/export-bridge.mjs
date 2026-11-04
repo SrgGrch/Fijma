@@ -66,6 +66,9 @@ try {
   const small = await call('PNG');
   assert.equal(small.structuredContent.width, 10);
   assert.equal(small.content.find(item => item.type === 'image').data, output.toString('base64'));
+  assert.equal(small.structuredContent.data, undefined);
+  assert.deepEqual(JSON.parse(small.content.find(item => item.type === 'text').text), small.structuredContent);
+  assert.equal(JSON.stringify(small.structuredContent).includes(output.toString('base64')), false);
   output = png(70000);
   const large = await call('PNG');
   assert.equal(large.structuredContent.bytes, output.length);

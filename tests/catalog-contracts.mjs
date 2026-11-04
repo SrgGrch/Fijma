@@ -4,6 +4,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { mkdtemp, readFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/validators/cf-worker';
 
 const scope = { sessionId: 's', connectionGeneration: 1 };
 const operationId = '019a4a10-0000-7000-8000-000000000001';
@@ -33,7 +34,12 @@ try {
   assert.equal(instructions.includes(await readFile(keyPath, 'utf8')), false, 'instructions must never expose the pairing key');
   const { tools } = await client.listTools();
   assert.equal(tools.length, 10);
+  assert.ok(Buffer.byteLength(JSON.stringify({ tools })) < 500_000, 'published tools/list remains compact');
   const byName = Object.fromEntries(tools.map(tool => [tool.name, tool]));
+  const validate = new CfWorkerJsonSchemaValidator().getValidator(byName.figma_apply_batch.inputSchema);
+  assert.equal(validate(calls.figma_apply_batch).valid, true);
+  assert.equal(validate({ ...calls.figma_apply_batch, steps: [] }).valid, false);
+  assert.ok(JSON.stringify(byName.figma_apply_batch.inputSchema).includes('"$ref"'));
   for (const [name, field] of Object.entries({ figma_get_nodes: 'nodes', figma_get_local_resources: 'resources', figma_navigate: 'currentPageId', figma_apply_batch: 'affectedNodeIds', figma_get_operation: 'affectedNodeIds', figma_cancel_operation: 'affectedNodeIds', figma_export_node: 'bytes' })) {
     const schema = JSON.stringify(byName[name].outputSchema);
     assert.ok(schema.includes(`"${field}"`), `${name} advertises successful output`);
@@ -52,10 +58,12 @@ try {
   for (const [name, args] of [
     ['figma_get_nodes', { ...calls.figma_get_nodes, fields: ['fills.0.color'] }],
     ['figma_get_local_resources', { ...calls.figma_get_local_resources, fields: ['modes'] }],
+    ['figma_apply_batch', { ...calls.figma_apply_batch, steps: [calls.figma_apply_batch.steps[0], calls.figma_apply_batch.steps[0]] }],
   ]) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true, name);
     assert.notEqual(result.structuredContent?.error?.code, 'NOT_CONNECTED', name);
+    assert.match(result.content[0].text, /Input validation error/, name);
   }
   console.log('MCP catalog: output schemas, disconnected calls, projection allowlists OK');
 } finally {

@@ -31,8 +31,10 @@ export const navigateOutputSchema = result(z.strictObject({ currentPageId: id, s
 export const operationOutputSchema = result(operationResultSchema);
 const exportMetadata = { sessionId: id, nodeId: id, bytes: z.number().int().positive() };
 const dimensions = { width: z.number().int().positive(), height: z.number().int().positive() };
+const inlinePng = z.strictObject({ ...exportMetadata, ...dimensions, format: z.literal('PNG'), mimeType: z.literal('image/png') });
+export const inlinePngTransferSchema = inlinePng.extend({ data: id });
 export const exportOutputSchema = result(z.union([
-  z.strictObject({ ...exportMetadata, ...dimensions, format: z.literal('PNG'), mimeType: z.literal('image/png'), data: id }),
+  inlinePng,
   z.strictObject({ ...exportMetadata, ...dimensions, format: z.literal('PNG'), mimeType: z.literal('image/png'), uri: id, expiresAt: z.string() }),
   z.strictObject({ ...exportMetadata, format: z.literal('SVG'), mimeType: z.literal('image/svg+xml'), uri: id, expiresAt: z.string() }),
 ]));

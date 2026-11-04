@@ -93,3 +93,22 @@ export async function localResources(api: PluginAPI, kind: Exclude<Kind, 'compon
     api.getLocalEffectStylesAsync(), api.getLocalGridStylesAsync()]);
   return lists.flat();
 }
+
+// Hash the requested resource state without retaining a projected copy for every row.
+export async function resourceFingerprint(kind: Exclude<Kind, 'components'>, resources: ObjectLike[], fields: readonly string[], yieldControl: () => Promise<void>) {
+  const hash = [2166136261, 2246822519, 3266489917, 668265263];
+  const add = (text: string) => {
+    for (let i = 0; i < text.length; i++) for (let j = 0; j < hash.length; j++)
+      hash[j] = Math.imul(hash[j] ^ text.charCodeAt(i), [16777619, 2246822519, 3266489917, 668265263][j]);
+  };
+  let count = 0;
+  for (const resource of resources) {
+    add(JSON.stringify(resource.id));
+    for (const field of fields) {
+      try { add(JSON.stringify([field, valueFor(resource, field, kind)]) ?? 'undefined'); }
+      catch { add(JSON.stringify([field, { unavailable: true }])); }
+    }
+    if (++count % 50 === 0) await yieldControl();
+  }
+  return hash.map(value => (value >>> 0).toString(16).padStart(8, '0')).join('');
+}
