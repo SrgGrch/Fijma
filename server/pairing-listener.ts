@@ -137,7 +137,7 @@ export async function createPairingListener(secret: string, port: number, diagno
                 if (reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const operation = operations.get(reply.requestId ?? '');
                 if (!operation) return;
-                if (operation.id !== reply.operationId || 'operationId' in reply.data && (reply.data.connectionGeneration > binding.connectionGeneration || operation.action === 'applyBatch' && reply.data.connectionGeneration !== binding.connectionGeneration)) throw new Error('PROTOCOL_MISMATCH');
+                if (operation.id !== reply.operationId) throw new Error('PROTOCOL_MISMATCH');
                 operations.delete(reply.requestId!); clearTimeout(operation.timer);
                 const timing = { operationId: reply.operationId, durationMs: performance.now() - operation.started };
                 if ('operationId' in reply.data) {
