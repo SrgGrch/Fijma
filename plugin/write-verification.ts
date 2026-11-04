@@ -7,7 +7,8 @@ type Changes = { nodeIds: string[]; resourceIds: string[] };
 export async function verifyWrite(api: any, step: BatchStep, changes: Changes, previousParents: string[], limits: { maxNodes: number; maxResponseBytes: number; maxBatchSteps: number }, check: () => void, previousGroups: string[] = []) {
   const direct = new Set(changes.nodeIds);
   const nameOnly = step.op === 'renamePage' || (step.op === 'updateNode' && Object.keys((step.patch ?? {}) as object).every(key => key === 'name'));
-  const queue = [...new Set([...changes.nodeIds, ...(nameOnly ? [] : previousParents)])];
+  const local = ['createNode', 'updateNode', 'setGeometry', 'importSvg'].includes(step.op);
+  const queue = [...new Set([...changes.nodeIds, ...(nameOnly || local ? [] : previousParents)])];
   const seen = new Set<string>();
   let resourceCount = 0;
   const result: any[] = [];
@@ -98,8 +99,8 @@ export async function verifyWrite(api: any, step: BatchStep, changes: Changes, p
       }
     }
     result.push({ nodeId: id, properties });
-    if (!nameOnly && node.parent?.id) queue.push(node.parent.id);
-    if (!nameOnly && node.type !== 'PAGE' && node.type !== 'DOCUMENT' && 'children' in node) for (const child of node.children) queue.push(child.id);
+    if (!nameOnly && node.parent?.id && (!local || direct.has(id) && node.parent.layoutMode && node.parent.layoutMode !== 'NONE')) queue.push(node.parent.id);
+    if (!nameOnly && node.type !== 'PAGE' && node.type !== 'DOCUMENT' && 'children' in node && (!local || direct.has(id) || node.layoutMode && node.layoutMode !== 'NONE')) for (const child of node.children) queue.push(child.id);
     if (!changes.nodeIds.includes(id)) changes.nodeIds.push(id);
     if (encodeURI(JSON.stringify(result)).replace(/%[A-F\d]{2}/g, 'x').length > Math.floor(limits.maxResponseBytes / limits.maxBatchSteps)) throw new Error('RESOURCE_LIMIT');
   }

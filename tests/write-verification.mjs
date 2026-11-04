@@ -35,6 +35,12 @@ const renameDetails = await verifyWrite(api, rename, renameChanges, ['large', 'p
 assert.deepEqual(renameChanges.nodeIds, ['rect:0']);
 assert.deepEqual(renameDetails.map(row => row.nodeId), ['rect:0']);
 assert.equal(renameDetails[0].properties.name, 'Renamed');
+const geometry = { stepId: 'resize', op: 'setGeometry', target: { nodeId: 'rect:0' }, size: { width: 20, height: 10 } };
+largeFrame.children[0].width = 20;
+const localChanges = { nodeIds: ['rect:0'], resourceIds: [] };
+const localDetails = await verifyWrite(api, geometry, localChanges, ['large', 'page', 'root'], { ...limits, maxResponseBytes: 32768, maxBatchSteps: 10 }, () => {});
+assert.deepEqual(localDetails.map(row => row.nodeId), ['rect:0']);
+assert.equal(localDetails[0].properties.width, 20);
 const longText = { id: 'long-text', type: 'TEXT', name: 'Renamed', parent: largeFrame, characters: 'x'.repeat(50000), getStyledTextSegments() { throw Error('unrelated text read'); } };
 nodes.set(longText.id, longText);
 const textRename = await verifyWrite(api, { ...rename, type: 'TEXT', target: { nodeId: longText.id } }, { nodeIds: [longText.id], resourceIds: [] }, ['large'], { ...limits, maxResponseBytes: 32768, maxBatchSteps: 1 }, () => {});
