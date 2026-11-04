@@ -137,7 +137,7 @@ for (const sourceKind of ['top', 'parent', 'null']) {
   assert.equal(h.messages.filter(message => message.type === 'pairing-save').length, 1);
   assert.equal(h.sockets[1].sent[0].secret, token);
   h.elements.disconnect.onclick(); assert.equal(h.timers.size, 0);
-  h.document.hidden = true; h.listeners.visibilitychange(); h.document.hidden = false; h.listeners.visibilitychange();
+  h.document.hidden = true; h.listeners.visibilitychange?.(); h.document.hidden = false; h.listeners.visibilitychange?.();
   assert.equal(h.sockets.length, 2, 'manual disconnect stays paused on visibility changes');
   h.elements.resume.onclick(); assert.equal(h.sockets.length, 3);
   h.sockets.at(-1).onclose({ reason: 'SESSION_BUSY' }); assert.equal(h.timers.size, 0);
@@ -150,16 +150,21 @@ for (const sourceKind of ['top', 'parent', 'null']) {
   const h = uiFixture(); h.fromMain({ type: 'pairing-loaded', secret: token });
   assert.equal(h.sockets.length, 1); h.bind();
   assert.ok(!h.messages.some(message => message.type === 'pairing-save'));
-  h.document.hidden = true; h.listeners.visibilitychange(); assert.equal(h.sockets[0].readyState, 3);
-  h.document.hidden = false; h.listeners.visibilitychange(); assert.equal(h.sockets.length, 2);
+  h.elements.write.checked = true;
+  h.document.hidden = true; h.listeners.visibilitychange?.(); assert.equal(h.sockets[0].readyState, 1);
+  assert.equal(h.elements.write.checked, true, 'hiding preserves write permission on the same connection');
+  h.document.hidden = false; h.listeners.visibilitychange?.(); assert.equal(h.sockets.length, 1);
   h.sockets.at(-1).onclose({ reason: 'AUTH_FAILED' }); assert.equal(h.timers.size, 0);
   assert.equal(h.messages.at(-1).type, 'pairing-forget');
   assert.equal(h.elements['pairing-panel'].hidden, false);
 }
 {
   const h = uiFixture(); h.document.hidden = true; h.fromMain({ type: 'pairing-loaded', secret: token });
-  assert.equal(h.sockets.length, 0);
-  h.document.hidden = false; h.listeners.visibilitychange(); h.sockets[0].onclose({ reason: '' });
+  assert.equal(h.sockets.length, 1, 'remembered pairing connects while hidden'); h.bind();
+  h.sockets[0].onclose({ reason: '' }); assert.equal(h.timers.size, 1);
+  h.fireTimer(); assert.equal(h.sockets.length, 2, 'network recovery runs while hidden');
+  h.bind(undefined, 2); assert.equal(h.elements.write.checked, false, 'real reconnect still resets writes');
+  h.sockets[1].onclose({ reason: '' });
   h.windowListeners.pagehide(); assert.equal(h.timers.size, 0);
 }
 {

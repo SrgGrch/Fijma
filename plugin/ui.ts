@@ -48,11 +48,11 @@ function savePairing() {
 }
 function start() {
   cancelRetry();
-  if (!automatic || document.hidden || !credential) return;
+  if (!automatic || !credential) return;
   controller.connect(credential);
 }
 function reconnect() {
-  if (!automatic || document.hidden || !credential) return;
+  if (!automatic || !credential) return;
   state('waiting', 'Ждём локальный мост', 'Подключимся автоматически, когда сервер запустится.');
   retry = setTimeout(start, Math.min(1000 * 2 ** Math.min(attempt++, 4), 15000));
 }
@@ -88,7 +88,7 @@ const controller = createBridgeController({
   writeEnabled: false,
   onReady: () => {
     ready = true; attempt = 0;
-    state('ready', 'Мост подключён', 'Можно отправлять задачи агенту.');
+    state('ready', 'Мост подключён', 'Агент работает с этим файлом, даже когда окно скрыто.');
     showError('');
     write.disabled = false; stop.disabled = false;
     element('workspace').hidden = false;
@@ -109,7 +109,6 @@ const controller = createBridgeController({
 });
 connect.onclick = () => {
   const token = secret.value.trim(); secret.value = '';
-  if (document.hidden) return;
   if (!pairingSecret.safeParse(token).success) { showError('Введите ключ из 64 символов из локального файла сопряжения.'); secret.focus(); return; }
   credential = token; saved = false; automatic = true; attempt = 0;
   showError(''); pairingView(); start();
@@ -123,11 +122,6 @@ forget.onclick = () => {
   sendMain({ type: 'pairing-forget' });
   state('offline', 'Сопряжение удаляется', 'Подождите, пока сохранённый ключ будет удалён.');
 };
-document.addEventListener('visibilitychange', () => {
-  cancelRetry();
-  if (document.hidden) controller.disconnect();
-  else start();
-});
 window.addEventListener('pagehide', () => { automatic = false; cancelRetry(); controller.disconnect(); });
 write.onchange = () => { if (ready) controller.setWriteEnabled(write.checked); };
 stop.onclick = () => { if (ready) controller.stop(); };

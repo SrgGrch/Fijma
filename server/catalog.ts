@@ -15,7 +15,7 @@ const outputSchemas = {
 } satisfies Record<keyof typeof toolInputs, z.ZodType>;
 
 const descriptions: Record<keyof typeof toolInputs, string> = {
-  figma_get_context: 'Состояние моста и доступного документа. Не требует сессии.',
+  figma_get_context: 'Состояние моста и закреплённого файла плагина, который может работать в фоне. Не требует сессии.',
   figma_get_tree: 'Ограниченное дерево узлов текущей сессии.',
   figma_find_nodes: 'Поиск узлов в явно заданной области текущего документа.',
   figma_get_nodes: 'Чтение запрошенных свойств по nodeId.',
@@ -36,6 +36,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
   const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' }, {
     instructions: [
       'На вопросы о текущем файле Figma сначала вызывай figma_get_context; не угадывай открытый файл.',
+      'Мост закреплён за файлом, где запущен плагин, и работает в фоне. Контекст показывает подключённый файл, не обязательно активную вкладку Figma. Переключение окон или файлов не меняет адресата команд; для другого файла нужно явно отключить прежний плагин и подключить новый.',
       'Если figma_get_context вернул state=disconnected или инструмент вернул NOT_CONNECTED, сразу сообщи: «fijma сейчас отключена от Figma», и в том же ответе дай шаги подключения, без дополнительного вопроса пользователю.',
       `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
       'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Figma MCP Bridge, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',

@@ -83,7 +83,8 @@ try {
   runInNewContext(await readFile('dist/candidate/main.js', 'utf8'), { figma, __html__: '' });
   class Socket extends WebSocket { constructor() { super(`ws://127.0.0.1:${port}`); sockets.push(this); } }
   elements = createUIElements();
-  ui = { setTimeout, clearTimeout, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: Socket,
+  const visibilityListeners = {};
+  ui = { setTimeout, clearTimeout, document: { hidden: false, addEventListener(type, handler) { visibilityListeners[type] = handler; }, getElementById: id => elements[id] }, WebSocket: Socket,
     parent: { postMessage: ({ pluginMessage }) => queueMicrotask(() => figma.ui.onmessage(pluginMessage)) } };
   ui.window = ui; ui.addEventListener = () => {};
   const html = await readFile('dist/plugin/ui.html', 'utf8'); runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
@@ -108,22 +109,32 @@ try {
 
   elements.write.checked = true; elements.write.onchange();
   for (let i = 0; i < 50 && !(await ready(a)).writeEnabled; i++) await delay(10);
+  ui.document.hidden = true; visibilityListeners.visibilitychange?.();
+  const background = await ready(a);
+  assert.equal(background.connectionGeneration, scope.connectionGeneration);
+  assert.equal(background.writeEnabled, true);
+  assert.equal(sockets.length, 1, 'backgrounding must not reconnect');
   const complete = await call(a, 'figma_apply_batch', { scope, operationId: operationId(1), steps: [{ stepId: 'first', op: 'createPage', name: 'Applied' }] });
   assert.equal(complete.structuredContent.status, 'succeeded'); assert.equal(count, 1);
   holding = true;
-  const pending = call(a, 'figma_apply_batch', { scope, operationId: operationId(2), steps: [
+  const pendingId = operationId(2), queuedId = operationId(3);
+  const pending = call(a, 'figma_apply_batch', { scope, operationId: pendingId, steps: [
     { stepId: 'partial', op: 'createPage', name: 'Partial' }, { stepId: 'later', op: 'createPage', name: 'Must not run' },
   ] }).catch(() => undefined);
   for (let i = 0; i < 100 && !heldYield; i++) await delay(10);
   assert.ok(heldYield); assert.equal(count, 2);
-  const queued = call(a, 'figma_apply_batch', { scope, operationId: operationId(3), steps: [{ stepId: 'queued', op: 'createPage', name: 'Must not run' }] }).catch(() => undefined);
+  const queued = call(a, 'figma_apply_batch', { scope, operationId: queuedId, steps: [{ stepId: 'queued', op: 'createPage', name: 'Must not run' }] }).catch(() => undefined);
   await delay(30);
+  ui.document.hidden = false; visibilityListeners.visibilitychange?.();
+  ui.document.hidden = true; visibilityListeners.visibilitychange?.();
+  assert.equal((await call(a, 'figma_get_operation', { scope, operationId: pendingId })).structuredContent.status, 'running');
+  assert.equal((await call(a, 'figma_get_operation', { scope, operationId: queuedId })).structuredContent.status, 'queued');
   process.kill(a.transport.pid, 'SIGKILL'); await Promise.all([pending, queued]);
   console.log('Shared bridge: owner killed during batch');
   const next = await ready(c), nextScope = { sessionId: next.sessionId, connectionGeneration: next.connectionGeneration };
   assert.notEqual(next.connectionGeneration, scope.connectionGeneration); assert.equal(next.writeEnabled, false);
   holding = false; ui.onmessage({ data: { pluginMessage: heldYield } }); await delay(50);
-  assert.equal(count, 2, 'in-flight and queued writes must stop without replay');
+  assert.equal(count, 2, 'in-flight and queued background writes must stop on owner loss without replay');
   assert.equal((await call(c, 'figma_get_tree', { scope, rootId: page.id, depth: 1, limit: 10 })).structuredContent.error.code, 'SESSION_EXPIRED');
   await assert.rejects(c.client.readResource({ uri: exported.uri }), /RESOURCE_EXPIRED/);
   const tree = await call(c, 'figma_get_tree', { scope: nextScope, rootId: page.id, depth: 1, limit: 10 });
