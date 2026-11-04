@@ -10,7 +10,7 @@ npm ci
 npm run build
 ```
 
-В Figma Desktop откройте тестовый Design-файл. Выберите Plugins → Development → Import plugin from manifest и укажите `G:\Projects\AI\Figma-plugin-mcp\dist\plugin\manifest.json`. Запустите Figma MCP Bridge из Development. Внешние библиотеки Figma не нужны. Чтение и экспорт доступны после сопряжения; запись включается отдельно переключателем в UI.
+В Figma Desktop откройте тестовый Design-файл. Выберите Plugins → Development → Import plugin from manifest и укажите `G:\Projects\AI\Figma-plugin-mcp\dist\plugin\manifest.json`. Запустите Fijma из Development. Внешние библиотеки Figma не нужны. Чтение и экспорт доступны после сопряжения; запись включается отдельно переключателем в UI.
 
 ## MCP-клиент и сопряжение
 
@@ -19,7 +19,7 @@ npm run build
 ```json
 {
   "mcpServers": {
-    "figma-local": {
+    "fijma": {
       "command": "node",
       "args": ["G:\\Projects\\AI\\Figma-plugin-mcp\\dist\\server\\index.js"]
     }

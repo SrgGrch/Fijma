@@ -1,4 +1,4 @@
-# Figma MCP Bridge
+# Fijma
 
 English | [Русский](README.ru.md)
 
@@ -12,6 +12,8 @@ A local MCP bridge for reading and editing an open Design file in Figma Desktop.
 
 The project currently installs from source: there is no published npm package.
 
+Fijma keeps the existing `figma_*` tool names, plugin ID, `FIGMA_MCP_*` environment variables, and `.figma-mcp-bridge` pairing directory for compatibility. Existing client configurations continue to work; new examples use `fijma` as the connection name.
+
 ## Installation
 
 ```powershell
@@ -21,7 +23,7 @@ npm ci
 npm run build
 ```
 
-Open a Design file in Figma Desktop. Select **Plugins → Development → Import plugin from manifest** and choose the absolute path to `dist/plugin/manifest.json`. Run **Figma MCP Bridge**.
+Open a Design file in Figma Desktop. Select **Plugins → Development → Import plugin from manifest** and choose the absolute path to `dist/plugin/manifest.json`. Run **Fijma**.
 
 Then connect the MCP server to your client. In the examples below, replace `C:\path\to\Fijma` with the absolute path to your cloned project. Backslashes are doubled in JSON. Node.js must be available in the client's `PATH`; specify the absolute path to `node.exe` if needed.
 
@@ -30,19 +32,19 @@ Then connect the MCP server to your client. In the examples below, replace `C:\p
 Add the following to `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
-[mcp_servers.figma_local]
+[mcp_servers.fijma]
 command = "node"
 args = ['C:\path\to\Fijma\dist\server\index.js']
 ```
 
-Both CLI and Desktop read this configuration. In the CLI, you can also run `codex mcp add figma_local -- node C:\path\to\Fijma\dist\server\index.js`. [Codex MCP documentation](https://developers.openai.com/codex/mcp/).
+Both CLI and Desktop read this configuration. In the CLI, you can also run `codex mcp add fijma -- node C:\path\to\Fijma\dist\server\index.js`. [Codex MCP documentation](https://developers.openai.com/codex/mcp/).
 
 ### Claude Code
 
 Run this in the project directory:
 
 ```powershell
-claude mcp add --transport stdio --scope local figma-local -- node C:\path\to\Fijma\dist\server\index.js
+claude mcp add --transport stdio --scope local fijma -- node C:\path\to\Fijma\dist\server\index.js
 ```
 
 `local` ties the configuration to the current project. Use `--scope user` for all projects. [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
@@ -54,7 +56,7 @@ Create `.cursor/mcp.json` in the project or `%USERPROFILE%\.cursor\mcp.json` for
 ```json
 {
   "mcpServers": {
-    "figma-local": {
+    "fijma": {
       "type": "stdio",
       "command": "node",
       "args": ["C:\\path\\to\\Fijma\\dist\\server\\index.js"]
@@ -70,7 +72,7 @@ Create `.cursor/mcp.json` in the project or `%USERPROFILE%\.cursor\mcp.json` for
 Run:
 
 ```powershell
-gemini mcp add figma-local node C:\path\to\Fijma\dist\server\index.js
+gemini mcp add fijma node C:\path\to\Fijma\dist\server\index.js
 ```
 
 Alternatively, add the same `mcpServers` object with `command` and `args` to `%USERPROFILE%\.gemini\settings.json`. [Gemini CLI MCP documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md).
