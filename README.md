@@ -1,16 +1,18 @@
 # Figma MCP Bridge
 
-Локальный MCP-мост для чтения и редактирования открытого Design-файла в Figma Desktop. MCP-клиент получает структурированные инструменты для узлов, страниц, локальных стилей и переменных, пакетных изменений и экспорта PNG/SVG. Мост не выполняет произвольный код из запроса.
+English | [Русский](README.ru.md)
 
-## Что нужно
+A local MCP bridge for reading and editing an open Design file in Figma Desktop. The MCP client gets structured tools for nodes, pages, local styles and variables, batch changes, and PNG/SVG exports. The bridge does not execute arbitrary code from requests.
 
-- Node.js 20+ и npm.
-- Figma Desktop и доступ к **Plugins → Development**.
-- MCP-клиент с поддержкой локального stdio-сервера.
+## Requirements
 
-Проект пока устанавливается из исходников: опубликованного npm-пакета нет.
+- Node.js 20+ and npm.
+- Figma Desktop with access to **Plugins → Development**.
+- An MCP client that supports a local stdio server.
 
-## Как установить
+The project currently installs from source: there is no published npm package.
+
+## Installation
 
 ```powershell
 git clone https://github.com/SrgGrch/Fijma.git
@@ -19,13 +21,13 @@ npm ci
 npm run build
 ```
 
-Откройте Design-файл в Figma Desktop. Выберите **Plugins → Development → Import plugin from manifest** и укажите абсолютный путь к `dist/plugin/manifest.json`. Запустите **Figma MCP Bridge**.
+Open a Design file in Figma Desktop. Select **Plugins → Development → Import plugin from manifest** and choose the absolute path to `dist/plugin/manifest.json`. Run **Figma MCP Bridge**.
 
-Затем подключите MCP-сервер к своему клиенту. В примерах ниже замените `C:\path\to\Fijma` на абсолютный путь к клонированному проекту. Для JSON обратные слеши удвоены. Node.js должен быть доступен в `PATH` клиента; при необходимости укажите абсолютный путь к `node.exe`.
+Then connect the MCP server to your client. In the examples below, replace `C:\path\to\Fijma` with the absolute path to your cloned project. Backslashes are doubled in JSON. Node.js must be available in the client's `PATH`; specify the absolute path to `node.exe` if needed.
 
 ### Codex CLI / Codex Desktop
 
-Добавьте в `%USERPROFILE%\.codex\config.toml`:
+Add the following to `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
 [mcp_servers.figma_local]
@@ -33,21 +35,21 @@ command = "node"
 args = ['C:\path\to\Fijma\dist\server\index.js']
 ```
 
-CLI и Desktop читают эту конфигурацию. В CLI можно также выполнить `codex mcp add figma_local -- node C:\path\to\Fijma\dist\server\index.js`. [Документация Codex MCP](https://developers.openai.com/codex/mcp/).
+Both CLI and Desktop read this configuration. In the CLI, you can also run `codex mcp add figma_local -- node C:\path\to\Fijma\dist\server\index.js`. [Codex MCP documentation](https://developers.openai.com/codex/mcp/).
 
 ### Claude Code
 
-Выполните в каталоге проекта:
+Run this in the project directory:
 
 ```powershell
 claude mcp add --transport stdio --scope local figma-local -- node C:\path\to\Fijma\dist\server\index.js
 ```
 
-`local` привязывает настройку к текущему проекту. Для всех проектов используйте `--scope user`. [Документация Claude Code MCP](https://code.claude.com/docs/en/mcp).
+`local` ties the configuration to the current project. Use `--scope user` for all projects. [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ### Cursor
 
-Создайте `.cursor/mcp.json` в проекте или `%USERPROFILE%\.cursor\mcp.json` для всех проектов:
+Create `.cursor/mcp.json` in the project or `%USERPROFILE%\.cursor\mcp.json` for all projects:
 
 ```json
 {
@@ -61,25 +63,25 @@ claude mcp add --transport stdio --scope local figma-local -- node C:\path\to\Fi
 }
 ```
 
-[Документация Cursor MCP](https://cursor.com/docs/mcp).
+[Cursor MCP documentation](https://cursor.com/docs/mcp).
 
 ### Gemini CLI
 
-Выполните:
+Run:
 
 ```powershell
 gemini mcp add figma-local node C:\path\to\Fijma\dist\server\index.js
 ```
 
-Или добавьте такой же объект `mcpServers` с `command` и `args` в `%USERPROFILE%\.gemini\settings.json`. [Документация Gemini CLI MCP](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md).
+Alternatively, add the same `mcpServers` object with `command` and `args` to `%USERPROFILE%\.gemini\settings.json`. [Gemini CLI MCP documentation](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md).
 
-### Сопряжение и первый запрос
+### Pairing and your first request
 
-Перезапустите или обновите MCP-подключение клиента. Адаптер автоматически поднимет общий локальный мост. Он выводит путь к `pairing-secret.txt` в stderr. Если клиент не показывает stderr, запустите из корня проекта `node scripts/manual-client.mjs`: он покажет путь и позволит отправлять MCP-запросы по одной JSON-строке.
+Restart or refresh the client's MCP connection. The adapter automatically starts the shared local bridge. It prints the path to `pairing-secret.txt` to stderr. If the client does not show stderr, run `node scripts/manual-client.mjs` from the project root: it displays the path and lets you send MCP requests as one JSON object per line.
 
-Откройте файл ключа локально, вставьте его в панель плагина и нажмите **«Подключиться и запомнить»**. Не отправляйте ключ в чат. Вызовите `figma_get_context`: статус должен быть `ready`, а имя документа должно совпасть с нужным файлом. Для записи включите переключатель в панели плагина; при новом соединении запись снова выключена. Остальные инструменты используют `scope` (`sessionId` и `connectionGeneration`) из текущего контекста. Подробнее: [запуск и сопряжение](docs/launch.md).
+Open the key file locally, paste it into the plugin panel, and click **«Подключиться и запомнить»** (“Connect and remember”). Do not send the key in chat. Call `figma_get_context`: the status should be `ready`, and the document name should match the intended file. Enable the toggle in the plugin panel to allow writes; writes are disabled again on a new connection. Other tools use the `scope` (`sessionId` and `connectionGeneration`) from the current context. See [launch and pairing](docs/launch.md) for details.
 
-## Как собрать локально
+## Building locally
 
 ```powershell
 npm ci
@@ -87,20 +89,20 @@ npm run build
 npm test
 ```
 
-`npm run build` создаёт `dist/server/index.js` и файлы плагина в `dist/plugin/`. `npm test` запускает автоматические проверки, в том числе обмен через MCP SDK и loopback WebSocket с имитацией Figma. После обновления сборки закройте окно плагина, остановите старый общий процесс командой `npm run stop`, затем запустите плагин и MCP-подключение заново.
+`npm run build` creates `dist/server/index.js` and the plugin files in `dist/plugin/`. `npm test` runs automated checks, including communication through the MCP SDK and loopback WebSocket with simulated Figma behavior. After updating the build, close the plugin window, stop the old shared process with `npm run stop`, then restart the plugin and MCP connection.
 
-## Принцип работы
+## How it works
 
 ```text
-MCP-клиент ── stdio ── адаптер ── локальный общий мост ── WebSocket ── UI плагина ── Figma Plugin API
+MCP client ── stdio ── adapter ── shared local bridge ── WebSocket ── plugin UI ── Figma Plugin API
 ```
 
-Каждый клиент запускает свой stdio-адаптер; общий мост слушает только `127.0.0.1:55263` и обслуживает одно сопряжённое соединение с плагином. Первый клиент, вызвавший инструмент, владеет документом до отключения; остальные получают `SESSION_BUSY`. Секрет сопряжения хранится локально, а плагин запоминает его в `figma.clientStorage`.
+Each client starts its own stdio adapter; the shared bridge listens only on `127.0.0.1:55263` and serves one paired plugin connection. The first client to call a tool owns the document until it disconnects; others receive `SESSION_BUSY`. The pairing secret is stored locally, and the plugin remembers it in `figma.clientStorage`.
 
-Чтение доступно после сопряжения. Запись разрешается в UI плагина для закреплённого документа и выполняется последовательными пакетами с предусловиями и проверкой результата. Stop отменяет следующие шаги и очередь; уже применённые изменения не откатываются. При переключении окна Figma плагин продолжает работать с тем файлом, где был запущен. Для другого файла отключите прежний плагин и подключите новый. Экспорт PNG/SVG проходит через ограниченные по размеру сообщения и временные MCP-ресурсы.
+Reading is available after pairing. Writes are enabled in the plugin UI for the pinned document and run in sequential batches with preconditions and result verification. Stop cancels subsequent steps and the queue; changes already applied are not rolled back. When you switch Figma windows, the plugin keeps working with the file where it was started. To use another file, disconnect the previous plugin and connect the new one. PNG/SVG exports pass through size-limited messages and temporary MCP resources.
 
-Запросы документа и экспорты передаются вашему MCP-клиенту и выбранному им поставщику модели. Начинайте запись с копии документа. Ограничения операций и размеров: [контракты](shared/contracts.md), [профиль лимитов](docs/limits.md), [исполнение пакетов](shared/execution.md). Исходники находятся в `plugin/`, `server/` и `shared/`; проверки — в `tests/`.
+Document requests and exports are sent to your MCP client and its selected model provider. Start writes with a copy of the document. For operation and size limits, see [contracts](shared/contracts.md), the [limits profile](docs/limits.md), and [batch execution](shared/execution.md). Source code is in `plugin/`, `server/`, and `shared/`; checks are in `tests/`.
 
-## Лицензия
+## License
 
 [MIT](LICENSE).
