@@ -88,3 +88,7 @@ npm run build
 | [openspec/changes/figma-mcp-bridge-mvp/](openspec/changes/figma-mcp-bridge-mvp/) | Согласованные требования, дизайн и задачи. |
 
 Исходники плагина находятся в `plugin/`, MCP-сервера — в `server/`, общие контракты и исполнитель — в `shared/`. `tests/` содержит автоматические проверки, `experiments/` — диагностические стенды, `docs/artifacts/` — артефакты приёмки, `Test-data/` — тестовые материалы. Сборка в `dist/` и зависимости в `node_modules/` исключены из Git.
+
+## Лицензия
+
+[MIT License](LICENSE). Copyright (c) 2024 Kabir Oberai.
