@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-const source = await readFile('dist/candidate/main.js', 'utf8');
+const source = await readFile('dist/plugin/main.js', 'utf8');
 const messages = [], nodes = new Map();
 let count = 0, undos = 0, holdYield = false, waiting, holdRead = false, releaseRead;
 const figma = { root: { name: 'Document', children: [] }, currentPage: { id: 'page', selection: [] },
@@ -90,4 +90,4 @@ const changedResult = messages.pop().data;
 assert.equal(changedResult.status, 'partially_applied');
 assert.equal(changedResult.error.code, 'DOCUMENT_MISMATCH');
 assert.equal(changedResult.affectedNodeIds.length, 1); assert.equal(undos, 5);
-console.log('Candidate fakeFigma: gated writes, readback, dedup, stop OK');
+console.log('Production fakeFigma: gated writes, readback, dedup, stop OK');
