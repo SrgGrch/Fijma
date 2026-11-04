@@ -125,8 +125,8 @@ function uiFixture() {
   assert.equal(h.messages.filter(message => message.type === 'pairing-save').length, 1);
   assert.equal(h.sockets[1].sent[0].secret, token);
   h.elements.disconnect.onclick(); assert.equal(h.timers.size, 0);
-  h.document.hidden = true; h.listeners.visibilitychange(); h.document.hidden = false; h.listeners.visibilitychange();
-  assert.equal(h.sockets.length, 2, 'manual disconnect stays paused on visibility changes');
+  h.document.hidden = true; h.document.hidden = false;
+  assert.equal(h.sockets.length, 2, 'manual disconnect stays paused');
   h.elements.resume.onclick(); assert.equal(h.sockets.length, 3);
   h.sockets.at(-1).onclose({ reason: 'SESSION_BUSY' }); assert.equal(h.timers.size, 0);
   assert.match(h.elements['connection-help'].textContent, /занят/);
@@ -138,16 +138,16 @@ function uiFixture() {
   const h = uiFixture(); h.fromMain({ type: 'pairing-loaded', secret: token });
   assert.equal(h.sockets.length, 1); h.bind();
   assert.ok(!h.messages.some(message => message.type === 'pairing-save'));
-  h.document.hidden = true; h.listeners.visibilitychange(); assert.equal(h.sockets[0].readyState, 3);
-  h.document.hidden = false; h.listeners.visibilitychange(); assert.equal(h.sockets.length, 2);
+  h.document.hidden = true; h.listeners.visibilitychange?.(); assert.equal(h.sockets[0].readyState, 1);
+  assert.equal(h.sockets.length, 1, 'hidden panel keeps its connection');
   h.sockets.at(-1).onclose({ reason: 'AUTH_FAILED' }); assert.equal(h.timers.size, 0);
   assert.equal(h.messages.at(-1).type, 'pairing-forget');
   assert.equal(h.elements['pairing-panel'].hidden, false);
 }
 {
   const h = uiFixture(); h.document.hidden = true; h.fromMain({ type: 'pairing-loaded', secret: token });
-  assert.equal(h.sockets.length, 0);
-  h.document.hidden = false; h.listeners.visibilitychange(); h.sockets[0].onclose({ reason: '' });
+  assert.equal(h.sockets.length, 1);
+  h.sockets[0].onclose({ reason: '' });
   h.windowListeners.pagehide(); assert.equal(h.timers.size, 0);
 }
 {
