@@ -21,6 +21,18 @@ async function save(base64, mimeType) {
   await writeFile(path, bytes, { flag: 'wx' });
   return { path, bytes: bytes.length, mimeType };
 }
+function isToolRequest(request) {
+  return request && typeof request.name === 'string' && request.arguments && typeof request.arguments === 'object' && !Array.isArray(request.arguments);
+}
+async function callTool(request) {
+  const result = await client.callTool({ name: request.name, arguments: request.arguments });
+  if (request.name === 'figma_export_node' && result.structuredContent?.data) {
+    const { data, ...metadata } = result.structuredContent;
+    result.structuredContent = { ...metadata, file: await save(data, metadata.mimeType) };
+    result.content = result.content.filter(item => item.type !== 'image' && item.type !== 'text');
+  }
+  return result;
+}
 
 try {
   await client.connect(transport);
@@ -35,14 +47,15 @@ try {
         result = await client.readResource({ uri: request.uri });
         result.contents = await Promise.all(result.contents.map(async item => item.blob
           ? { uri: item.uri, ...await save(item.blob, item.mimeType) } : item));
-      } else if (typeof request.name === 'string' && request.arguments && typeof request.arguments === 'object' && !Array.isArray(request.arguments)) {
-        result = await client.callTool({ name: request.name, arguments: request.arguments });
-        if (request.name === 'figma_export_node' && result.structuredContent?.data) {
-          const { data, ...metadata } = result.structuredContent;
-          result.structuredContent = { ...metadata, file: await save(data, metadata.mimeType) };
-          result.content = result.content.filter(item => item.type !== 'image' && item.type !== 'text');
+      } else if (request.action === 'parallel') {
+        if (!Array.isArray(request.requests) || request.requests.length < 1 || request.requests.length > 3 || !request.requests.every(isToolRequest)) {
+          throw new Error('Expected 1 to 3 tool requests');
         }
-      } else throw new Error('Expected {name, arguments}, {action: "readResource", uri}, or {action: "quit"}');
+        result = (await Promise.allSettled(request.requests.map(callTool))).map(item => item.status === 'fulfilled'
+          ? item.value : { error: item.reason instanceof Error ? item.reason.message : 'Request failed' });
+      } else if (isToolRequest(request)) {
+        result = await callTool(request);
+      } else throw new Error('Expected {name, arguments}, {action: "parallel", requests}, {action: "readResource", uri}, or {action: "quit"}');
       process.stdout.write(`${JSON.stringify(result)}\n`);
     } catch (error) {
       process.stdout.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'Request failed' })}\n`);
