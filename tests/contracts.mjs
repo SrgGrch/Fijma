@@ -26,6 +26,10 @@ for (const [kind, field] of [['components', 'remote'], ['styles', 'value'], ['co
 assert.equal(toolInputs.figma_get_local_resources.safeParse({ scope, kind: 'variables', fields: ['modes'], limit: 10 }).success, false);
 assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['fills.0.color'] }).success, false);
 assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['textSegments'] }).success, true);
+assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['gridStyleId', 'layoutGrids'] }).success, true);
+assert.equal(stepSchema.safeParse({ stepId: 'grid', op: 'unbindStyle', target: { nodeId: '1:1' }, property: 'layoutGrids', expected: { gridStyleId: 'S:old', layoutGrids: [{ pattern: 'COLUMNS', alignment: 'STRETCH', gutterSize: 8, count: 4 }] } }).success, true);
+assert.equal(stepSchema.safeParse({ stepId: 'variable', op: 'updateVariable', variableId: 'VariableID:1', patch: { name: 'Name' }, expected: { valuesByMode: { m: { color: { type: 'VARIABLE_ALIAS', id: 'VariableID:color' }, opacity: { type: 'VARIABLE_ALIAS', id: 'VariableID:alpha' } } } } }).success, true);
+assert.equal(stepSchema.safeParse({ stepId: 'line', op: 'setGeometry', target: { nodeId: '1:1' }, rotation: 0, expected: { height: 0, parentId: null, fontName: { family: 'Inter', style: 'Regular', variationSettings: { wght: 500 } } } }).success, true);
 assert.equal(toolInputs.figma_get_nodes.safeParse({ scope, nodeIds: ['1:1'], fields: ['layout', 'constraints', 'layoutSizingHorizontal', 'layoutSizingVertical'] }).success, true);
 const valid = [
   create,
@@ -42,6 +46,10 @@ const valid = [
   { stepId: 'range', op: 'replaceTextRange', target: { nodeId: '1:2' }, start: 0, end: 2, text: 'Hi', insertionFormatting: { inherit: 'AFTER' }, expected: { characters: 'Hello' } },
 ];
 for (const value of valid) assert.equal(stepSchema.safeParse(value).success, true, value.op);
+for (const type of ['COMPONENT', 'INSTANCE']) {
+  assert.equal(stepSchema.safeParse({ stepId: 'update', op: 'updateNode', type, target: { nodeId: '1:1' }, expected: { name: 'Before' }, patch: { name: 'After', cornerRadius: 2 } }).success, true);
+  assert.equal(stepSchema.safeParse({ ...create, type }).success, false);
+}
 const range = valid.at(-1);
 const fullRangeStyle = { fontName: { family: 'Inter', style: 'Regular' }, fontSize: 16, lineHeight: { unit: 'AUTO' }, letterSpacing: { unit: 'PIXELS', value: 0 }, textCase: 'ORIGINAL', textDecoration: 'NONE', fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }] };
 assert.equal(stepSchema.safeParse({ ...range, insertionFormatting: { format: fullRangeStyle } }).success, true);

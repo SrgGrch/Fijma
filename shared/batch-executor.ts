@@ -12,7 +12,7 @@ type Platform = {
   checkScope(scope: Scope): void;
   preflight?(step: BatchStep): void;
   yieldControl?(): Promise<void>;
-  prepare(step: BatchStep, original?: BatchStep): Promise<void>;
+  prepare(step: BatchStep, original?: BatchStep, guard?: () => void): Promise<void>;
   readExpected(step: BatchStep): Promise<Record<string, unknown>>;
   execute(step: BatchStep, record: (changes: Changes) => void, cancelled: () => boolean): Promise<Outputs>;
   verify?(step: BatchStep, changes: Changes): Promise<unknown[]>;
@@ -25,7 +25,8 @@ const error = (e: unknown, stepId?: string): Failure => {
   const code = codes.includes(message) ? message : 'FIGMA_API_ERROR';
   const fonts = code === 'FONT_UNAVAILABLE' && e && typeof e === 'object' ? (e as any).details?.fonts : undefined;
   const validFonts = Array.isArray(fonts) && fonts.length > 0 && fonts.length <= 100 && fonts.every(f => f && typeof f.family === 'string' && f.family.length > 0 && f.family.length <= 200 && typeof f.style === 'string' && f.style.length > 0 && f.style.length <= 200);
-  return { code, message: code === 'FIGMA_API_ERROR' ? 'The operation failed.' : message, ...(validFonts ? { details: { fonts: fonts.map(f => ({ family: f.family, style: f.style })) } } : {}), ...(stepId ? { failedStep: stepId } : {}), recoveryAction: code === 'CONFLICT' ? 'Read the current state and prepare a new operation.' : 'Inspect the operation and current document state.' };
+  const modeLimit = code === 'CAPABILITY_UNAVAILABLE' && e && typeof e === 'object' && (e as any).details?.reason === 'VARIABLE_MODE_LIMIT';
+  return { code, message: modeLimit ? 'The editor cannot add another variable mode.' : code === 'FIGMA_API_ERROR' ? 'The operation failed.' : message, ...(validFonts ? { details: { fonts: fonts.map(f => ({ family: f.family, style: f.style })) } } : modeLimit ? { details: { reason: 'VARIABLE_MODE_LIMIT' } } : {}), ...(stepId ? { failedStep: stepId } : {}), recoveryAction: modeLimit ? 'Use an existing mode or check the editor limits.' : code === 'CONFLICT' ? 'Read the current state and prepare a new operation.' : 'Inspect the operation and current document state.' };
 };
 function equal(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -97,7 +98,7 @@ export class BatchExecutor {
         if (job.cancelled) { status = 'cancelled'; continue; }
         this.platform.checkScope(scope);
         const step = resolve(original, outputs);
-        await this.platform.prepare(step, original);
+        await this.platform.prepare(step, original, () => { if (job.cancelled) throw new Error('CANCELLED'); this.platform.checkScope(scope); });
         if (job.cancelled) { status = 'cancelled'; continue; }
         this.platform.checkScope(scope);
         if (step.expected) {
@@ -121,6 +122,7 @@ export class BatchExecutor {
         outputs.set(step.stepId, item.outputs);
         if (job.cancelled) status = 'cancelled';
       } catch (e) {
+        if (job.cancelled && !item.appliedChanges.nodeIds.length && !item.appliedChanges.resourceIds.length && !item.appliedChanges.details?.length) { status = 'cancelled'; continue; }
         item.status = 'failed';
         item.error = failure = error(e, item.stepId);
         status = results.some(r => r.appliedChanges.nodeIds.length || r.appliedChanges.resourceIds.length || r.appliedChanges.details?.length) ? 'partially_applied' : 'failed';

@@ -5,4 +5,5 @@ await build({ entryPoints: ['plugin/candidate.ts'], bundle: true, target: 'es201
 await copyFile('dist/plugin/ui.html', 'dist/candidate/ui.html');
 const manifest = JSON.parse(await readFile('plugin/manifest.json', 'utf8'));
 manifest.name = 'Figma MCP Bridge - manual test candidate';
+manifest.id = 'figma-mcp-bridge-candidate-local';
 await writeFile('dist/candidate/manifest.json', JSON.stringify(manifest, null, 2));

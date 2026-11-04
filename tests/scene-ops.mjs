@@ -77,7 +77,7 @@ for (const [index, type] of ['FRAME', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON',
 }
 assert.deepEqual(fonts, [{ family: 'Inter', style: 'Regular' }]);
 const countBefore = sceneNodes.size;
-const denied = await runScene(20, [{ stepId: 'unsupported', op: 'createNode', type: 'FRAME', parent: { nodeId: container.id }, properties: { opacity: 0.5 } }]);
+const denied = await runScene(20, [{ stepId: 'unsupported', op: 'createNode', type: 'FRAME', parent: { nodeId: container.id }, properties: { layout: { layoutMode: 'HORIZONTAL' } } }]);
 assert.equal(denied.error.code, 'CAPABILITY_UNAVAILABLE');
 assert.equal(sceneNodes.size, countBefore);
 const missingFont = await runScene(21, [{ stepId: 'text', op: 'createNode', type: 'TEXT', parent: { nodeId: container.id }, properties: { fontName: { family: 'Missing', style: 'Regular' }, characters: 'hello' } }]);
@@ -102,7 +102,7 @@ const beforeUnsupportedUpdate = target.name;
 const unsupportedUpdate = await runScene(26, [{ stepId: 'unsupported-update', op: 'updateNode', type: target.type, target: { nodeId: target.id }, patch: { name: 'must-not-write', opacity: 0.5 }, expected: { name: beforeUnsupportedUpdate } }]);
 assert.equal(unsupportedUpdate.error.code, 'NODE_NOT_FOUND');
 const liveTarget = container.children[0];
-const rejectPatch = await runScene(27, [{ stepId: 'unsupported-update', op: 'updateNode', type: liveTarget.type, target: { nodeId: liveTarget.id }, patch: { name: 'must-not-write', opacity: 0.5 }, expected: { name: liveTarget.name } }]);
+const rejectPatch = await runScene(27, [{ stepId: 'unsupported-update', op: 'updateNode', type: liveTarget.type, target: { nodeId: liveTarget.id }, patch: { name: 'must-not-write', layout: { layoutMode: 'HORIZONTAL' } }, expected: { name: liveTarget.name } }]);
 assert.equal(rejectPatch.error.code, 'CAPABILITY_UNAVAILABLE');
 assert.notEqual(liveTarget.name, 'must-not-write');
 Object.defineProperty(liveTarget, 'x', { get() { return 0; }, set() { throw Error('write failed'); }, configurable: true });
@@ -139,3 +139,15 @@ Object.defineProperty(removablePage, 'id', { get() { if (this.removed) throw Err
 const pageDeletion = await submit(34, [{ stepId: 'delete', op: 'deletePage', pageId: { nodeId: removablePageId }, expected: { name: 'remove me' } }]);
 assert.equal(pageDeletion.status, 'succeeded');
 assert.deepEqual(pageDeletion.affectedNodeIds, [removablePageId]);
+for (const [index, type] of ['GROUP', 'COMPONENT', 'COMPONENT_SET', 'INSTANCE', 'BOOLEAN_OPERATION', 'VECTOR', 'SECTION'].entries()) {
+  const item = sceneNode(type); container.appendChild(item);
+  if (['COMPONENT', 'INSTANCE'].includes(type)) {
+    const updated = await runScene(35 + index * 3, [{ stepId: 'update', op: 'updateNode', type, target: { nodeId: item.id }, patch: { name: 'Updated' }, expected: { name: item.name } }]);
+    assert.equal(updated.status, 'succeeded');
+  }
+  const clone = await runScene(36 + index * 3, [{ stepId: 'clone', op: 'cloneNode', target: { nodeId: item.id }, parent: { nodeId: container.id }, expected: { name: item.name } }]);
+  assert.equal(clone.status, 'succeeded', type);
+  const removed = await runScene(37 + index * 3, [{ stepId: 'delete', op: 'deleteNode', target: { nodeId: item.id }, expected: { name: item.name } }]);
+  assert.equal(removed.status, 'succeeded', type);
+  if (type === 'COMPONENT' || type === 'COMPONENT_SET') assert.match(removed.steps[0].appliedChanges.details[0].effect, /linked instances/);
+}

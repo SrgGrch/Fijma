@@ -29,6 +29,8 @@ const hello = { type: 'hello', protocolVersion: 1, sessionId: 'new', capabilitie
 server({ type: 'paired' }); fromMain(hello);
 server({ ...hello, type: 'welcome', connectionGeneration: 2 });
 fromMain({ type: 'bound', sessionId: 'new', connectionGeneration: 2, documentLabel: 'Fixture', writeEnabled: true, message: 'diagnostic' });
+fromMain({ type: 'operationResult', sessionId: 'new', connectionGeneration: 2, operationId: '019a4a10-0000-7000-8000-000000000001', data: { error: { code: 'CONFLICT', message: 'Document changed', recoveryAction: 'Read again' } } });
+assert.match(elements['bridge-status'].textContent, /CONFLICT: Document changed/);
 const beforeRun = main.length;
 elements.run.onclick();
 assert.equal(main.length, beforeRun);

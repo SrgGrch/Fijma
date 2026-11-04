@@ -1,3 +1,4 @@
+import { nodePreconditions } from './resource-expected';
 import type { BatchStep } from '../shared/batch-refs';
 import { checkTextPatch, unavailableFonts } from './text-links';
 
@@ -9,7 +10,8 @@ const isFont = (value: any): value is Font => value && typeof value.family === '
 const splitPair = (text: string, i: number) => i > 0 && i < text.length && text.charCodeAt(i - 1) >= 0xd800 && text.charCodeAt(i - 1) <= 0xdbff && text.charCodeAt(i) >= 0xdc00 && text.charCodeAt(i) <= 0xdfff;
 
 export function textRangeOperations(figma: Api) {
-  let node: any, related = new Map<string, any>(), snapshot = '';
+  let node: any, snapshot = '';
+  const checks = nodePreconditions(figma);
   const find = async (id: string) => {
     const found = await figma.getNodeByIdAsync(id);
     if (!found || found.removed) throw new Error('NODE_NOT_FOUND');
@@ -51,19 +53,9 @@ export function textRangeOperations(figma: Api) {
     const patch = step.op === 'formatTextRange' ? step.format as Record<string, unknown> : (step.insertionFormatting as any).format;
     if (patch && Object.keys(patch).some(key => !(key in setters) || typeof node[setters[key]] !== 'function')) throw new Error('CAPABILITY_UNAVAILABLE');
   };
-  const project = (target: any, expected: Record<string, unknown>) => {
-    const result: Record<string, unknown> = {};
-    for (const key of Object.keys(expected)) {
-      if (key === 'parentId') result[key] = target.parent?.id;
-      else if (key === 'children' && 'children' in target) result[key] = target.children.map((child: any) => child.id);
-      else if (key === 'textSegments' && target.type === 'TEXT') result[key] = target.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']);
-      else if (['name', 'characters', 'fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'textStyleId', 'boundVariables'].includes(key) && key in target && typeof target[key] !== 'symbol') result[key] = target[key];
-      else throw new Error('CAPABILITY_UNAVAILABLE');
-    }
-    return result;
-  };
   return {
     async prepare(step: BatchStep) {
+      checks.reset();
       if (!['formatTextRange', 'replaceTextRange'].includes(step.op)) throw new Error('CAPABILITY_UNAVAILABLE');
       node = await find((step.target as { nodeId: string }).nodeId);
       if (node.type !== 'TEXT') throw new Error('INVALID_ARGUMENT');
@@ -78,16 +70,12 @@ export function textRangeOperations(figma: Api) {
       }
       if (missing.length) throw unavailableFonts(missing);
       if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
-      related = new Map();
-      for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
     async readExpected(step: BatchStep) {
-      const { related: expectations, ...expected } = step.expected as Record<string, any>;
-      const result = project(node, expected);
-      if (expectations) result.related = Object.fromEntries(Object.entries(expectations).map(([id, fields]) => [id, project(related.get(id), fields as Record<string, unknown>)]));
-      return result;
+      return checks.read(node, step.expected as Record<string, any>);
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
+      checks.verify();
       validate(step);
       if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
       const state = current();

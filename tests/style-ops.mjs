@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+const built = await build({ entryPoints: ['plugin/style-ops.ts', 'shared/batch-executor.ts', 'shared/operation-journal.ts'], outdir: 'out', bundle: true, platform: 'node', format: 'esm', write: false });
+const load = async n => import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[n].text).toString('base64')}`);
+const { styleOperations, stylePreflight } = await load(0), { BatchExecutor } = await load(1), { OperationJournal } = await load(2);
+const styles = new Map(), nodes = new Map(); let sequence = 0;
+const api = { mixed: Symbol(), async getStyleByIdAsync(id) { return styles.get(id) ?? null; }, async getNodeByIdAsync(id) { return nodes.get(id) ?? null; }, async loadFontAsync() {},
+  getImageByHash(hash) { return hash === 'known' ? {} : null; },
+  createPaintStyle() { const item = { id: `S:${++sequence}`, type: 'PAINT', name: '', paints: [], remote: false, remove() { styles.delete(this.id); } }; styles.set(item.id, item); return item; },
+};
+for (const type of ['TEXT', 'EFFECT', 'GRID']) api[`create${type === 'TEXT' ? 'Text' : type === 'EFFECT' ? 'Effect' : 'Grid'}Style`] = () => {
+  const item = { id: `S:${++sequence}`, type, name: '', remote: false, ...(type === 'TEXT' ? { fontName: { family: 'Inter', style: 'Regular' }, fontSize: 12 } : type === 'EFFECT' ? { effects: [] } : { layoutGrids: [] }) };
+  styles.set(item.id, item); return item;
+};
+for (const id of ['a', 'b']) nodes.set(id, { id, type: 'RECTANGLE', name: id, fillStyleId: '', get fills() { return styles.get(this.fillStyleId)?.paints ?? []; }, boundVariables: {}, async setFillStyleIdAsync(styleId) { this.fillStyleId = styleId; } });
+const ops = styleOperations(api);
+const executor = new BatchExecutor(new OperationJournal({ dedupTtl: 10000, clockSkew: 100, maxJournalEntries: 50 }), { ...ops, preflight: step => stylePreflight(step, api), checkScope() {}, commitUndo() {} }, 1);
+const now = Date.now(), hex = now.toString(16).padStart(12, '0'); let seq = 0;
+const run = step => executor.submit({ sessionId: 's', connectionGeneration: 1 }, `${hex.slice(0, 8)}-${hex.slice(8)}-7000-8000-${String(++seq).padStart(12, '0')}`, [{ stepId: 's', ...step }], now);
+assert.throws(() => run({ op: 'createStyle', type: 'PAINT', name: 'Bad image', value: { paints: [{ type: 'IMAGE', imageHash: 'missing', scaleMode: 'FILL' }] } }), /INVALID_ARGUMENT/);
+assert.equal((await run({ op: 'createStyle', type: 'PAINT', name: 'Local image', value: { paints: [{ type: 'IMAGE', imageHash: 'known', scaleMode: 'FILL' }] } })).status, 'succeeded');
+const made = await run({ op: 'createStyle', type: 'PAINT', name: 'Paint', value: { paints: [] } });
+assert.equal(made.status, 'succeeded'); const styleId = made.steps[0].outputs.styleId;
+for (const [type, value] of [['TEXT', { fontSize: 14 }], ['EFFECT', { effects: [] }], ['GRID', { layoutGrids: [] }]]) {
+  const result = await run({ op: 'createStyle', type, name: type, value });
+  assert.equal(result.status, 'succeeded'); assert.equal(styles.get(result.steps[0].outputs.styleId).type, type);
+}
+const effect = await run({ op: 'createStyle', type: 'EFFECT', name: 'Shadow', value: { effects: [{ type: 'DROP_SHADOW', color: { r: 0, g: 0, b: 0 }, offset: { x: 0, y: 1 }, radius: 3 }] } });
+assert.equal(styles.get(effect.steps[0].outputs.styleId).effects[0].color.a, 1);
+const grid = await run({ op: 'createStyle', type: 'GRID', name: 'Grid', value: { layoutGrids: [{ pattern: 'GRID', sectionSize: 8, color: { r: 1, g: 0, b: 0 } }] } });
+assert.equal(styles.get(grid.steps[0].outputs.styleId).layoutGrids[0].color.a, 1);
+const gridStyleId = grid.steps[0].outputs.styleId;
+const frame = { id: 'grid-frame', type: 'FRAME', name: 'Grid frame', gridStyleId: 'S:current', layoutGrids: [], boundVariables: {}, async setGridStyleIdAsync(id) { this.gridStyleId = id; } };
+nodes.set(frame.id, frame);
+assert.equal((await run({ op: 'applyStyle', target: { nodeId: frame.id }, property: 'layoutGrids', styleId: gridStyleId, expected: { gridStyleId: 'S:stale' } })).error.code, 'CONFLICT');
+assert.equal(frame.gridStyleId, 'S:current');
+assert.equal((await run({ op: 'unbindStyle', target: { nodeId: frame.id }, property: 'layoutGrids', expected: { gridStyleId: 'S:stale' } })).error.code, 'CONFLICT');
+assert.equal(frame.gridStyleId, 'S:current');
+assert.equal((await run({ op: 'unbindStyle', target: { nodeId: frame.id }, property: 'layoutGrids', expected: { gridStyleId: 'S:current' } })).status, 'succeeded');
+assert.equal(frame.gridStyleId, '');
+for (const target of [nodes.get('a'), nodes.get('b')]) assert.equal((await run({ op: 'applyStyle', target: { nodeId: target.id }, property: 'fills', styleId, expected: { name: target.name, related: { [styleId]: { name: 'Paint' } } } })).status, 'succeeded');
+const paints = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 0.5 }, opacity: 0.6 }];
+const actualPaints = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 }, opacity: 0.3 }];
+assert.equal((await run({ op: 'updateStyle', styleId, patch: { value: { paints } }, expected: { name: 'Paint', paints: [] } })).status, 'succeeded');
+assert.deepEqual(styles.get(styleId).paints, actualPaints); assert.equal(nodes.get('a').fillStyleId, styleId); assert.equal(nodes.get('b').fillStyleId, styleId);
+assert.deepEqual(nodes.get('a').fills, actualPaints); assert.deepEqual(nodes.get('b').fills, actualPaints);
+nodes.get('a').boundVariables = { fills: [{ type: 'VARIABLE_ALIAS', id: 'VariableID:1' }] };
+assert.equal((await run({ op: 'applyStyle', target: { nodeId: 'a' }, property: 'fills', styleId, expected: { name: 'a' } })).error.code, 'CAPABILITY_UNAVAILABLE');
+nodes.get('a').boundVariables = {};
+assert.equal((await run({ op: 'unbindStyle', target: { nodeId: 'a' }, property: 'fills', expected: { name: 'a' } })).status, 'succeeded');
+assert.equal(nodes.get('a').fillStyleId, ''); assert.equal(nodes.get('b').fillStyleId, styleId);
+styles.set('S:first', { id: 'S:first', type: 'PAINT', name: 'First', paints: [], remote: false });
+styles.set('S:second', { id: 'S:second', type: 'PAINT', name: 'Second', paints: [], remote: false });
+let releaseDependency, notifyDependency;
+const dependencyStarted = new Promise(resolve => notifyDependency = resolve);
+api.getStyleByIdAsync = async id => { if (id === 'S:second') { notifyDependency(); await new Promise(resolve => releaseDependency = resolve); } return styles.get(id) ?? null; };
+const pendingRelated = run({ op: 'updateStyle', styleId, patch: { name: 'New' }, expected: { name: 'Paint', related: { 'S:first': { name: 'First' }, 'S:second': { name: 'Second' } } } });
+await dependencyStarted; styles.get('S:first').name = 'Changed'; releaseDependency();
+assert.equal((await pendingRelated).error.code, 'CONFLICT'); assert.equal(styles.get(styleId).name, 'Paint');
+api.getStyleByIdAsync = async id => styles.get(id) ?? null;
+const originalSetter = nodes.get('a').setFillStyleIdAsync;
+nodes.get('a').setFillStyleIdAsync = async function (id) { this.fillStyleId = id; throw Error('failed after write'); };
+const partial = await run({ op: 'applyStyle', target: { nodeId: 'a' }, property: 'fills', styleId, expected: { name: 'a' } });
+assert.equal(partial.status, 'partially_applied'); assert.deepEqual(partial.affectedNodeIds, ['a']);
+nodes.get('a').setFillStyleIdAsync = originalSetter;
+styles.get(styleId).remote = true;
+assert.equal((await run({ op: 'deleteStyle', styleId, expected: { name: 'Paint' } })).error.code, 'CAPABILITY_UNAVAILABLE');
+styles.get(styleId).remote = false;
+const deleted = await run({ op: 'deleteStyle', styleId, expected: { name: 'Paint' } });
+assert.equal(deleted.status, 'succeeded'); assert.match(deleted.steps[0].appliedChanges.details[0].effects, /consumers/);
+let releaseFont, fontStarted;
+const started = new Promise(resolve => fontStarted = resolve);
+api.loadFontAsync = async () => { fontStarted(); await new Promise(resolve => releaseFont = resolve); };
+const textStyle = { id: 'S:text', type: 'TEXT', name: 'Before', remote: false, fontName: { family: 'Inter', style: 'Regular' }, fontSize: 12, lineHeight: { unit: 'AUTO' }, letterSpacing: { unit: 'PIXELS', value: 0 }, textCase: 'ORIGINAL', textDecoration: 'NONE' };
+styles.set(textStyle.id, textStyle);
+nodes.set('text', { id: 'text', type: 'TEXT', name: 'Text', characters: 'x', textStyleId: '', boundVariables: {}, getRangeAllFontNames() { return [textStyle.fontName]; }, getStyledTextSegments() { return []; }, async setTextStyleIdAsync(id) { this.textStyleId = id; } });
+const pending = run({ op: 'applyStyle', target: { nodeId: 'text' }, property: 'text', styleId: 'S:text', expected: { name: 'Text', related: { 'S:text': { name: 'Before' } } } });
+await started; textStyle.name = 'Changed'; releaseFont();
+// The style font is loaded as well; release its independent load.
+await new Promise(resolve => setImmediate(resolve)); releaseFont();
+const conflict = await pending;
+assert.equal(conflict.error.code, 'CONFLICT'); assert.equal(nodes.get('text').textStyleId, '');
+console.log('Style operations: shared links, expected, binding protection and deletion OK');

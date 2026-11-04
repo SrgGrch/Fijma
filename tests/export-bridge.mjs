@@ -1,3 +1,4 @@
+import { createUIElements } from './ui-elements.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
@@ -19,7 +20,7 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = createUIElements();
   const chunk = (name, body) => {
     const type = Buffer.from(name), length = Buffer.alloc(4), crc = Buffer.alloc(4);
     length.writeUInt32BE(body.length);
@@ -49,8 +50,9 @@ try {
     ui: { postMessage(message) { queueMicrotask(() => { if (message.type === 'yield') yielded++; ui.onmessage({ data: { pluginMessage: message } }); if (message.type === 'bound') resolveBound(message); }); } } };
   runInNewContext(main, { figma, __html__: '' });
   class Socket extends WebSocket { constructor() { super(url); sockets.push(this); } }
-  ui = { document: { getElementById: id => elements[id] }, WebSocket: Socket,
+  ui = { setTimeout: () => 1, clearTimeout() {}, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: Socket,
     parent: { postMessage: ({ pluginMessage }) => queueMicrotask(() => figma.ui.onmessage(pluginMessage)) } };
+  ui.window = ui; ui.addEventListener = () => {};
   runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
   const connect = async () => {
     elements.secret.value = token; elements.connect.onclick();
@@ -91,4 +93,4 @@ try {
   for (const socket of sockets) socket.terminate();
   await client.close();
 }
-await assert.rejects(readFile(secretPath));
+assert.match(await readFile(secretPath, 'utf8'), /^[0-9a-f]{64}$/);

@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomInt, randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
-import { negotiateHello, validateAck } from '../shared/protocol';
+import { negotiateHello, validateAck, utf8Bytes } from '../shared/protocol';
 import { contextReplySchema, disconnectedContext, contextSchema } from '../shared/context';
 import { treeReplySchema, searchReplySchema, nodesReplySchema, resourcesReplySchema, navigateReplySchema } from '../shared/tree-result';
 import { toolInputs } from '../shared/contracts';
@@ -9,6 +9,7 @@ import { diagnosticControlSchema, operationReplySchema } from '../shared/ui-mess
 import { exportStartSchema, exportChunkSchema, exportErrorSchema } from '../shared/export-wire';
 import { ExportTransfer } from './export-transfer';
 import { createDiagnosticsSession } from './diagnostics-session';
+import { safeError as sanitizeError } from './safe-error';
 
 const pairSchema = z.strictObject({ type: z.literal('pair'), secret: z.string().length(64).regex(/^[0-9a-f]+$/) });
 const operationId = () => {
@@ -21,11 +22,7 @@ export async function createPairingListener(secret: string, port: number, diagno
   onControl: (socket: WebSocket, control: { action: 'positive' | 'replay' | 'snapshot' }, binding: ReturnType<typeof negotiateHello>) => void;
   onResult: (socket: WebSocket, reply: ReturnType<typeof operationReplySchema.parse>, binding: ReturnType<typeof negotiateHello>) => void;
 }, onBinding?: (binding?: ReturnType<typeof negotiateHello>) => void) {
-  const safeError = (error: { code: string; details?: unknown }) => {
-    const fonts = z.strictObject({ fonts: z.array(z.strictObject({ family: z.string().min(1).max(200), style: z.string().min(1).max(200) })).max(100) }).safeParse(error.details);
-    const details = error.code === 'FONT_UNAVAILABLE' && fonts.success && !JSON.stringify(fonts.data).includes(secret) ? { details: fonts.data } : {};
-    return { code: error.code, message: 'Operation in Figma failed.', recoveryAction: 'Check the error code and reread the context.', ...details };
-  };
+  const safeError = (error: { code: string; details?: unknown }) => sanitizeError(error, secret);
   const expected = Buffer.from(secret);
   if (expected.length !== 64) throw new Error('INVALID_ARGUMENT');
   const unauthenticated = new Set<WebSocket>();
@@ -214,9 +211,11 @@ export async function createPairingListener(secret: string, port: number, diagno
       return pending.promise;
     }
     const id = operationId();
+    const wire = JSON.stringify({ type: 'getContext', requestId: id, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration });
+    if (utf8Bytes(wire) > binding.limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
     const { promise, resolve, reject } = deferred('getContext', id);
     pending = { kind: 'context', id, promise, resolve, reject, timer: setTimeout(timeout, binding.limits.operationTimeout) };
-    active.send(JSON.stringify({ type: 'getContext', requestId: pending.id, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration }));
+    active.send(wire);
     return promise;
   }, async getTree(raw: unknown) { return read('getTree', raw); }, async findNodes(raw: unknown) { return read('findNodes', raw); },
     async getNodes(raw: unknown) { return read('getNodes', raw); }, async getLocalResources(raw: unknown) { return read('getLocalResources', raw); },
@@ -237,12 +236,14 @@ export async function createPairingListener(secret: string, port: number, diagno
     if (operations.size >= binding.limits.maxQueuedOperations + 2) throw new Error('RESOURCE_LIMIT');
     const { scope, operationId: id, ...params } = input;
     const requestId = randomUUID();
+    const wire = JSON.stringify({ type: 'command', ...scope, operationId: id, requestId, command, params });
+    if (utf8Bytes(wire) > binding.limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
     const started = performance.now();
     const promise = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => { operations.delete(requestId); journal?.failed(command, { operationId: id, durationMs: performance.now() - started }, 'OUTCOME_UNKNOWN'); reject(new Error('OUTCOME_UNKNOWN')); }, binding!.limits.operationTimeout);
       operations.set(requestId, { id, action: command, resolve, reject, timer, started });
     });
-    active.send(JSON.stringify({ type: 'command', ...scope, operationId: id, requestId, command, params }));
+    active.send(wire);
     return promise;
   }
 
@@ -258,12 +259,14 @@ export async function createPairingListener(secret: string, port: number, diagno
       ('nodeIds' in input && input.nodeIds.length > binding.limits.maxNodes)) throw new Error('RESOURCE_LIMIT');
     if (pending) throw new Error('RESOURCE_LIMIT');
     const id = operationId();
+    const { scope, ...params } = input;
+    const wire = JSON.stringify({ type: 'command', ...scope, operationId: id, command, params });
+    if (utf8Bytes(wire) > binding.limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
     const { promise, resolve, reject } = deferred(command, id);
     const kinds = { getTree: 'tree', findNodes: 'search', getNodes: 'nodes', getLocalResources: 'resources', navigate: 'navigate', exportNode: 'export' } as const;
     const transfer = command === 'exportNode' ? new ExportTransfer({ ...input.scope, operationId: id }, input as { nodeId: string; format: 'PNG' | 'SVG' }, binding.limits) : undefined;
     pending = { kind: kinds[command], id, promise, resolve, reject, transfer, timer: setTimeout(timeout, binding.limits.operationTimeout) };
-    const { scope, ...params } = input;
-    active.send(JSON.stringify({ type: 'command', ...scope, operationId: id, command, params }));
+    active.send(wire);
     return promise;
   }
 }

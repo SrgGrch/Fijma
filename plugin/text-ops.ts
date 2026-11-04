@@ -1,3 +1,5 @@
+import { appearanceKeys, appearancePatch, preflightAppearance, validateAppearance, applyAppearance } from './appearance-ops';
+import { nodePreconditions } from './resource-expected';
 import type { BatchStep } from '../shared/batch-refs';
 import { checkTextPatch, unavailableFonts } from './text-links';
 
@@ -11,7 +13,8 @@ const validFont = (font: any): font is Font => font && typeof font.family === 's
 
 // The dispatcher must keep this handler for prepare, readExpected and execute of the same step.
 export function textOperations(figma: TextApi) {
-  let node: any, parent: any, related = new Map<string, any>(), original = '';
+  let node: any, parent: any, original = '';
+  const checks = nodePreconditions(figma);
   const find = async (id: string) => {
     const value = await figma.getNodeByIdAsync(id);
     if (!value || value.removed) throw new Error('NODE_NOT_FOUND');
@@ -39,20 +42,9 @@ export function textOperations(figma: TextApi) {
       checkTextPatch([{ boundVariables: node.boundVariables }], patch);
     }
   };
-  const project = (target: any, expected: Record<string, unknown>) => {
-    const result: Record<string, unknown> = {};
-    for (const key of Object.keys(expected)) {
-      if (key === 'parentId') result[key] = target.parent?.id;
-      else if (key === 'children' && 'children' in target) result[key] = target.children.map((child: any) => child.id);
-      else if (key === 'textSegments' && target.type === 'TEXT') result[key] = target.getStyledTextSegments(['fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration', 'fills', 'textStyleId', 'fillStyleId', 'boundVariables']);
-      else if (['name', 'characters', ...fields, 'textStyleId', 'boundVariables'].includes(key) && key in target && typeof target[key] !== 'symbol') result[key] = target[key];
-      else throw new Error('CAPABILITY_UNAVAILABLE');
-    }
-    return result;
-  };
   return {
     async prepare(step: BatchStep) {
-      node = parent = undefined; related = new Map(); original = '';
+      node = parent = undefined; checks.reset(); original = '';
       const creating = step.op === 'createText' || step.op === 'createNode' && step.type === 'TEXT';
       if (creating) {
         parent = await find((step.parent as { nodeId: string }).nodeId);
@@ -62,7 +54,9 @@ export function textOperations(figma: TextApi) {
         if (node.type !== 'TEXT') throw new Error('INVALID_ARGUMENT');
       } else throw new Error('CAPABILITY_UNAVAILABLE');
       const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.op === 'setText' ? {} : step.patch) as Record<string, any>;
-      if (Object.keys(typography).some(key => !fields.includes(key) && !common.includes(key) && !(creating && key === 'characters'))) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (Object.keys(typography).some(key => !fields.includes(key) && !common.includes(key) && !appearanceKeys.includes(key) && !(creating && key === 'characters'))) throw new Error('CAPABILITY_UNAVAILABLE');
+      preflightAppearance(figma, appearancePatch(typography));
+      if (node) validateAppearance(figma, node, appearancePatch(typography));
       if (typography.width !== undefined && typography.width < 0.01 || typography.height !== undefined && typography.height < 0.01) throw new Error('INVALID_ARGUMENT');
       const newFont = step.op === 'createText' ? step.font as Font : typography.fontName as Font | undefined;
       if (step.op === 'createNode' && !newFont && Object.keys(typography).some(key => fields.includes(key) || key === 'characters')) throw new Error('CAPABILITY_UNAVAILABLE');
@@ -76,20 +70,19 @@ export function textOperations(figma: TextApi) {
       }
       if (missing.length) throw unavailableFonts(missing);
       if (node?.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
-      for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
     async readExpected(step: BatchStep) {
-      const { related: expectedRelated, ...expected } = step.expected as Record<string, any>;
-      const result = project(node ?? parent, expected);
-      if (expectedRelated) result.related = Object.fromEntries(Object.entries(expectedRelated).map(([id, fields]) => [id, project(related.get(id), fields as Record<string, unknown>)]));
-      return result;
+      return checks.read(node ?? parent, step.expected as Record<string, any>);
     },
     async execute(step: BatchStep, record: (changes: Changes) => void) {
+      checks.verify();
       if (node?.removed || parent?.removed) throw new Error('NODE_NOT_FOUND');
       if (node) { if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE'); if (signature() !== original) throw new Error('CONFLICT'); checkBindings(step); }
       const changed = (target: any) => record({ nodeIds: [target.id], resourceIds: [] });
       const creating = step.op === 'createText' || step.op === 'createNode';
       const typography = (step.op === 'createText' ? step.typography : step.op === 'createNode' ? step.properties : step.op === 'setText' ? {} : step.patch) as Record<string, any>;
+      if (node) validateAppearance(figma, node, appearancePatch(typography));
+      else preflightAppearance(figma, appearancePatch(typography));
       if (creating) {
         node = figma.createText(); changed(node);
         parent.appendChild(node);
@@ -109,6 +102,7 @@ export function textOperations(figma: TextApi) {
         if (key in typography && !(creating && key === 'fontName')) { node[key] = typography[key]; changed(node); }
       }
       if ('width' in typography || 'height' in typography) { node.resize(typography.width ?? node.width, typography.height ?? node.height); changed(node); }
+      applyAppearance(node, appearancePatch(typography), changed);
       if ('locked' in typography) { node.locked = typography.locked; changed(node); }
       return creating ? { nodeId: node.id } : {};
     },

@@ -1,3 +1,4 @@
+import { createUIElements } from './ui-elements.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
@@ -19,7 +20,7 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = createUIElements();
   let invalidate;
   const textNode = { id: '1:1', name: 'Target', type: 'TEXT', visible: false, locked: true };
   const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [textNode], async loadAsync() {}, on(_event, handler) { invalidate = handler; } };
@@ -30,8 +31,10 @@ try {
   let revealed = [];
   let ui, resolveBound;
   const bound = new Promise(resolve => resolveBound = resolve);
+  let createdPage;
   const figma = { root: { name: 'Test document', children: [page, otherPage] }, currentPage: page, mixed: Symbol('mixed'),
-    getNodeByIdAsync: async id => id === textNode.id ? textNode : id === otherNode.id ? otherNode : null,
+    getNodeByIdAsync: async id => id === textNode.id ? textNode : id === otherNode.id ? otherNode : id === createdPage?.id ? createdPage : null,
+    createPage() { createdPage = { id: '0:3', name: '', type: 'PAGE', children: [], parent: figma.root, async loadAsync() {}, on() {} }; figma.root.children.push(createdPage); return createdPage; }, commitUndo() {},
     async setCurrentPageAsync(next) { this.currentPage = next; }, viewport: { scrollAndZoomIntoView(nodes) { revealed = Array.from(nodes, node => node.id); } },
     variables: { getLocalVariablesAsync: async () => [{ id: 'v1', name: 'Color', resolvedType: 'COLOR', variableCollectionId: 'c', valuesByMode: { m: { type: 'VARIABLE_ALIAS', id: 'v2' } } }] },
     showUI() {}, ui: {
@@ -44,8 +47,9 @@ try {
   class Socket extends WebSocket {
     constructor(requested) { assert.equal(requested, 'ws://localhost:55263'); super(url); sockets.push(this); }
   }
-  ui = { document: { getElementById: id => elements[id] }, WebSocket: Socket,
+  ui = { setTimeout: () => 1, clearTimeout() {}, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: Socket,
     parent: { postMessage: ({ pluginMessage }) => queueMicrotask(() => figma.ui.onmessage(pluginMessage)) } };
+  ui.window = ui; ui.addEventListener = () => {};
   runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
   elements.secret.value = token;
   elements.connect.onclick();
@@ -91,8 +95,17 @@ try {
   assert.deepEqual((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.selection, ['1:1']);
   const stale = await client.callTool({ name: 'figma_get_tree', arguments: { scope: { ...scope, sessionId: 'old' }, rootId: '0:1', depth: 1, limit: 10 } });
   assert.equal(stale.structuredContent.error.code, 'SESSION_EXPIRED');
-  const unsupported = await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: '019a4a10-0000-7000-8000-000000000001' } });
-  assert.equal(unsupported.structuredContent.error.code, 'CAPABILITY_UNAVAILABLE');
+  const unknown = await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: '019a4a10-0000-7000-8000-000000000001' } });
+  assert.equal(unknown.structuredContent.status, 'unknown');
+  const stamp = Date.now().toString(16).padStart(12, '0');
+  const writeId = `${stamp.slice(0,8)}-${stamp.slice(8)}-7000-8000-000000000001`;
+  const writeArgs = { scope, operationId: writeId, steps: [{ stepId: 'page', op: 'createPage', name: 'Production write' }] };
+  assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: writeArgs })).structuredContent.error.code, 'WRITE_DISABLED');
+  elements.write.checked = true; elements.write.onchange();
+  for (let i = 0; i < 50 && !(await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.writeEnabled; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  const written = (await client.callTool({ name: 'figma_apply_batch', arguments: writeArgs })).structuredContent;
+  assert.equal(written.status, 'succeeded', JSON.stringify(written)); assert.equal(createdPage.name, 'Production write');
+  assert.equal((await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: writeId } })).structuredContent.status, 'succeeded');
   const navigation = await client.callTool({ name: 'figma_navigate', arguments: { scope, nodeIds: ['2:1'], select: true, reveal: true } });
   assert.equal(navigation.structuredContent.currentPageId, '0:2');
   assert.deepEqual(navigation.structuredContent.selection, ['2:1']);
@@ -104,4 +117,4 @@ try {
   for (const socket of sockets) socket.terminate();
   await client.close();
 }
-await assert.rejects(readFile(secretPath));
+assert.match(await readFile(secretPath, 'utf8'), /^[0-9a-f]{64}$/);

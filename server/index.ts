@@ -4,8 +4,10 @@ import { createPairingFile } from './pairing-file';
 import { createPairingListener } from './pairing-listener';
 import { ExportResourceStore } from './export-resources';
 import { exportChunkBytes } from '../shared/export-wire';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
-const pairing = await createPairingFile();
+const pairing = await createPairingFile(process.env.FIGMA_MCP_PAIRING_DIR ?? join(homedir(), '.figma-mcp-bridge'));
 let listener;
 let resources: ExportResourceStore | undefined;
 try {

@@ -55,4 +55,8 @@ const pageResult = await readNodes(pageApi, ['page'], ['children'], 10, 32768);
 assert.deepEqual(pageResult.nodes[0].properties.children, ['a', 'b']);
 assert.equal(pageApi.currentPage, currentPage);
 assert.equal(pageApi.currentPage.selection, selection);
+const grids = [{ pattern: 'GRID', sectionSize: 8 }, { pattern: 'ROWS', alignment: 'STRETCH', gutterSize: 4, count: 12 }, { pattern: 'COLUMNS', alignment: 'CENTER', gutterSize: 6, count: 4, sectionSize: 20, offset: 2 }];
+const gridNode = { id: 'grid', type: 'FRAME', gridStyleId: 'S:grid', layoutGrids: grids };
+const gridResult = await readNodes({ mixed, getNodeByIdAsync: async () => gridNode }, ['grid'], ['gridStyleId', 'layoutGrids'], 10, 32768);
+assert.deepEqual(gridResult.nodes[0].properties, { gridStyleId: 'S:grid', layoutGrids: grids });
 console.log('Проекции: mixed, unavailable, связи, скрытие, блокировка, сегменты и локальные ресурсы — OK');

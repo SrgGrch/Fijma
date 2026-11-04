@@ -1,3 +1,4 @@
+import { nodePreconditions } from './resource-expected';
 import type { BatchStep } from '../shared/batch-refs';
 import { unavailableFonts } from './text-links';
 
@@ -9,22 +10,12 @@ type Changes = { nodeIds: string[]; resourceIds: string[] };
 export function geometryOperations(figma: GeometryApi) {
   let node: any;
   let textFonts = '';
-  let related = new Map<string, any>();
+  const checks = nodePreconditions(figma);
   async function find(id: string) {
     const found = await figma.getNodeByIdAsync(id);
     if (!found || found.removed) throw new Error('NODE_NOT_FOUND');
     if (found.type === 'PAGE') await found.loadAsync();
     return found;
-  }
-  function projection(target: any, fields: Record<string, unknown>) {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(fields)) {
-      if (key === 'parentId') out[key] = target.parent?.id;
-      else if (key === 'children' && 'children' in target) out[key] = target.children.map((child: any) => child.id);
-      else if (['name', 'x', 'y', 'width', 'height', 'rotation', 'visible', 'locked'].includes(key) && key in target) out[key] = target[key];
-      else throw new Error('CAPABILITY_UNAVAILABLE');
-    }
-    return out;
   }
   function validate(step: BatchStep) {
     if (node.removed) throw new Error('NODE_NOT_FOUND');
@@ -36,6 +27,7 @@ export function geometryOperations(figma: GeometryApi) {
   }
   return {
     async prepare(step: BatchStep) {
+      checks.reset();
       if (step.op !== 'setGeometry') throw new Error('CAPABILITY_UNAVAILABLE');
       node = await find((step.target as { nodeId: string }).nodeId);
       if (!('x' in node) || typeof node.resize !== 'function') throw new Error('CAPABILITY_UNAVAILABLE');
@@ -51,16 +43,12 @@ export function geometryOperations(figma: GeometryApi) {
         if (missing.length) throw unavailableFonts(missing);
         if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');
       }
-      related = new Map();
-      for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
     async readExpected(step: BatchStep) {
-      const { related: expectations, ...fields } = step.expected as Record<string, any>;
-      const result = projection(node, fields);
-      if (expectations) result.related = Object.fromEntries(Object.entries(expectations).map(([id, fields]) => [id, projection(related.get(id), fields as Record<string, unknown>)]));
-      return result;
+      return checks.read(node, step.expected as Record<string, any>);
     },
     async execute(step: BatchStep, record: (change: Changes) => void) {
+      checks.verify();
       validate(step);
       if (step.size && node.type === 'TEXT') {
         if (node.hasMissingFont) throw new Error('FONT_UNAVAILABLE');

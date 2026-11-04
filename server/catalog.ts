@@ -62,7 +62,8 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
         }
       } catch (error) {
         const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
-        output = { error: { code, message: 'Запрос документа недоступен.', recoveryAction: 'Переподключите плагин и повторите чтение контекста.' } };
+        output = { error: { code, message: code === 'RESOURCE_LIMIT' ? 'Превышен лимит запроса или ресурса.' : 'Запрос документа недоступен.',
+          recoveryAction: code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
       if (name === 'figma_export_node' && !('error' in output)) {

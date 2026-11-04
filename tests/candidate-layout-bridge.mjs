@@ -1,3 +1,4 @@
+import { createUIElements } from './ui-elements.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
@@ -19,7 +20,7 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/candidate/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = createUIElements();
   const nodes = new Map(); let count = 0;
   const make = type => { const n = { id: 'node:' + ++count, type, name: type, x: 0, y: 0, width: 100, height: 100, rotation: 0, visible: true, locked: false, children: [], layoutMode: 'NONE', layoutWrap: 'NO_WRAP', itemSpacing: 0, paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0,
     appendChild(child) { this.children.push(child); child.parent = this; }, resize(w, h) { this.width = w; this.height = h; }, async loadAsync() {}, on() {} }; nodes.set(n.id, n); return n; };
@@ -38,8 +39,9 @@ try {
   class Socket extends WebSocket {
     constructor(requested) { assert.equal(requested, 'ws://localhost:55263'); super(url); sockets.push(this); }
   }
-  ui = { document: { getElementById: id => elements[id] }, WebSocket: Socket,
+  ui = { setTimeout: () => 1, clearTimeout() {}, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: Socket,
     parent: { postMessage: ({ pluginMessage }) => queueMicrotask(() => figma.ui.onmessage(pluginMessage)) } };
+  ui.window = ui; ui.addEventListener = () => {};
   runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
   elements.secret.value = token;
   elements.connect.onclick();

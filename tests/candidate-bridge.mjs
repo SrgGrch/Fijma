@@ -1,3 +1,4 @@
+import { createUIElements } from './ui-elements.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
@@ -19,10 +20,11 @@ try {
   const token = await readFile(secretPath, 'utf8');
   const main = await readFile('dist/candidate/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
-  const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
+  const elements = createUIElements();
   const nodes = new Map(); let count = 0;
   const page = { id: '0:1', name: 'Page', type: 'PAGE', selection: [], children: [], appendChild() {}, async loadAsync() {}, on() {} }; nodes.set(page.id, page);
-  let ui, resolveBound, holdYield = false, heldYield;
+  let ui, resolveBound, holdYield = false, heldYield, ackCount = 0;
+  const forwarded = new Map();
   const bound = new Promise(resolve => resolveBound = resolve);
   const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, mixed: Symbol('mixed'),
     getNodeByIdAsync: async id => nodes.get(id) ?? null, async loadFontAsync() { throw new Error('missing'); }, createPage() { const node = { id: 'new:' + ++count, name: '', type: 'PAGE', async loadAsync() {} }; nodes.set(node.id, node); return node; }, commitUndo() {},
@@ -35,9 +37,11 @@ try {
   runInNewContext(main, { figma, __html__: '' });
   class Socket extends WebSocket {
     constructor(requested) { assert.equal(requested, 'ws://localhost:55263'); super(url); sockets.push(this); }
+    send(data, ...args) { if (JSON.parse(data).type === 'ack') ackCount++; return super.send(data, ...args); }
   }
-  ui = { document: { getElementById: id => elements[id] }, WebSocket: Socket,
-    parent: { postMessage: ({ pluginMessage }) => queueMicrotask(() => figma.ui.onmessage(pluginMessage)) } };
+  ui = { setTimeout: () => 1, clearTimeout() {}, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: Socket,
+    parent: { postMessage: ({ pluginMessage }) => { if (pluginMessage.type === 'command') forwarded.set(pluginMessage.operationId, pluginMessage); queueMicrotask(() => figma.ui.onmessage(pluginMessage)); } } };
+  ui.window = ui; ui.addEventListener = () => {};
   runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
   elements.secret.value = token;
   elements.connect.onclick();
@@ -55,9 +59,22 @@ try {
   assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.writeEnabled, true);
   const stamp = Date.now().toString(16).padStart(12, '0');
   const operationId = `${stamp.slice(0,8)}-${stamp.slice(8)}-7000-8000-000000000001`;
+  for (const [i, steps] of [
+    [{ stepId: 'huge', op: 'createPage', name: 'x'.repeat(65536) }],
+    [{ stepId: 'first', op: 'createPage', name: 'valid' }, { stepId: 'later', op: 'createPage', name: '界'.repeat(22000) }],
+  ].entries()) {
+    const rejectedId = operationId.replace(/1$/, String(i + 4));
+    const rejected = (await client.callTool({ name: 'figma_apply_batch', arguments: { scope, operationId: rejectedId, steps } })).structuredContent;
+    assert.equal(rejected.error.code, 'RESOURCE_LIMIT'); assert.equal(count, 0);
+    const lookup = (await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: rejectedId } })).structuredContent;
+    assert.equal(lookup.status, 'unknown');
+  }
+  const oversizedRead = (await client.callTool({ name: 'figma_get_nodes', arguments: { scope, nodeIds: ['界'.repeat(22000)], fields: ['name'] } })).structuredContent;
+  assert.equal(oversizedRead.error.code, 'RESOURCE_LIMIT'); assert.equal(count, 0);
   const args = { scope, operationId, steps: [{ stepId: 'new', op: 'createPage', name: 'New' }] };
   const first = (await client.callTool({ name: 'figma_apply_batch', arguments: args })).structuredContent;
   assert.equal(first.status, 'succeeded', JSON.stringify(first));
+  assert.equal(ackCount, 0);
   assert.equal(first.steps[0].appliedChanges.details[0].properties.name, 'New');
   assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: args })).structuredContent.status, 'succeeded');
   assert.equal(count, 1);
@@ -80,6 +97,21 @@ try {
   assert.equal(cancelled.status, 'running');
   ui.onmessage({ data: { pluginMessage: heldYield } });
   assert.equal((await pending).structuredContent.status, 'cancelled'); assert.equal(count, 1);
+  heldYield = undefined;
+  const ackId = operationId.replace(/1$/, '9'), ackArgs = { ...args, operationId: ackId };
+  let settled = false;
+  const ackPending = client.callTool({ name: 'figma_apply_batch', arguments: ackArgs }).then(value => { settled = true; return value; });
+  for (let i = 0; i < 50 && !heldYield; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(heldYield);
+  const request = forwarded.get(ackId);
+  assert.ok(request?.requestId);
+  ui.onmessage({ data: { pluginMessage: { type: 'ack', ...scope, operationId: ackId, requestId: request.requestId } } });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(ackCount, 1); assert.equal(settled, false); assert.equal(count, 1);
+  ui.onmessage({ data: { pluginMessage: heldYield } });
+  assert.equal((await ackPending).structuredContent.status, 'succeeded'); assert.equal(count, 2);
+  assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: ackArgs })).structuredContent.status, 'succeeded');
+  assert.equal(count, 2); assert.equal(ackCount, 1);
   holdYield = false;
   elements.stop.onclick();
   await new Promise(resolve => setTimeout(resolve, 30));

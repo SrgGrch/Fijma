@@ -1,3 +1,4 @@
+import { nodePreconditions } from './resource-expected';
 import { stepSchema } from '../shared/contracts';
 import type { BatchStep } from '../shared/batch-refs';
 
@@ -10,30 +11,12 @@ const modes = ['HORIZONTAL', 'VERTICAL'];
 export function layoutOperations(api: Api) {
   let node: any;
   let schemaStep: BatchStep;
-  let related = new Map<string, any>();
+  const checks = nodePreconditions(api);
   async function find(id: string) {
     const result = await api.getNodeByIdAsync(id);
     if (!result || result.removed) throw new Error('NODE_NOT_FOUND');
     if (result.type === 'PAGE') await result.loadAsync();
     return result;
-  }
-  function projection(target: any, expected: Record<string, any>) {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(expected)) {
-      if (key === 'parentId') out[key] = target.parent?.id;
-      else if (key === 'children' && 'children' in target) out[key] = target.children.map((child: any) => child.id);
-      else if (key === 'layout' && expected.layout && typeof expected.layout === 'object') {
-        const layout: Record<string, unknown> = {};
-        for (const field of Object.keys(expected.layout)) {
-          if (!(layoutFields as readonly string[]).includes(field) || !(field in target)) throw new Error('CAPABILITY_UNAVAILABLE');
-          layout[field] = target[field];
-        }
-        out.layout = layout;
-      } else if (['name', 'x', 'y', 'width', 'height', 'rotation', 'visible', 'locked', 'constraints',
-        'layoutSizingHorizontal', 'layoutSizingVertical', 'boundVariables'].includes(key) && key in target && typeof target[key] !== 'symbol') out[key] = target[key];
-      else throw new Error('CAPABILITY_UNAVAILABLE');
-    }
-    return out;
   }
   function validate(step: BatchStep) {
     if (!stepSchema.safeParse(schemaStep).success) throw new Error('INVALID_ARGUMENT');
@@ -72,21 +55,18 @@ export function layoutOperations(api: Api) {
   }
   return {
     async prepare(step: BatchStep, original: BatchStep = step) {
+      checks.reset();
       schemaStep = original;
       if (!['setConstraints', 'setAutoLayout', 'setLayoutSizing'].includes(step.op)) throw new Error('CAPABILITY_UNAVAILABLE');
       if (!stepSchema.safeParse(schemaStep).success) throw new Error('INVALID_ARGUMENT');
       node = await find((step.target as { nodeId: string }).nodeId);
       validate(step);
-      related = new Map();
-      for (const id of Object.keys((step.expected as any)?.related ?? {})) related.set(id, await find(id));
     },
     async readExpected(step: BatchStep) {
-      const { related: expectations, ...fields } = step.expected as Record<string, any>;
-      const result = projection(node, fields);
-      if (expectations) result.related = Object.fromEntries(Object.entries(expectations).map(([id, fields]) => [id, projection(related.get(id), fields as Record<string, unknown>)]));
-      return result;
+      return checks.read(node, step.expected as Record<string, any>);
     },
     async execute(step: BatchStep, record: (change: Changes) => void) {
+      checks.verify();
       validate(step);
       const changed = () => record({ nodeIds: [node.id], resourceIds: [] });
       if (step.op === 'setConstraints') { node.constraints = step.value; changed(); }

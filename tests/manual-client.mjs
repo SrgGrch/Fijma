@@ -30,8 +30,8 @@ try {
   const exit = once(child, 'exit');
   child.stdin.end('{"action":"quit"}\n');
   assert.equal((await exit)[0], 0);
-  await assert.rejects(access(path));
-  console.log('Manual client: bad input, disconnected calls, parallel bounds and pairing cleanup OK');
+  await access(path);
+  console.log('Manual client: bad input, disconnected calls, parallel bounds and persistent pairing OK');
 } finally {
   if (child.exitCode === null) child.kill();
 }

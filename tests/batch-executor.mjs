@@ -63,6 +63,36 @@ assert.equal((await cancel).status, 'cancelled');
 assert.equal((await queued).status, 'cancelled');
 assert(!writes.includes('never') && !writes.includes('queued'));
 assert.equal(undo, 4);
+const afterFirst = deferred(), resume = deferred();
+let boundaries = 0, globalUndo = 0;
+const priority = new BatchExecutor(journal(), {
+  ...platform,
+  async yieldControl() { if (++boundaries === 2) { afterFirst.resolve(); await resume.promise; } },
+  undo() { globalUndo++; },
+}, 10);
+const active = priority.submit(scope, id(19), [create('applied'), create('not-applied')], now);
+await afterFirst.promise;
+const waiting = priority.submit(scope, id(20), [create('not-queued')], now);
+const undoBefore = undo;
+priority.stop(); resume.resolve();
+const stopped = await active;
+assert.equal(stopped.status, 'cancelled');
+assert.deepEqual(stopped.affectedNodeIds, ['id:applied']);
+assert.deepEqual(stopped.steps.map(step => step.status), ['succeeded', 'skipped']);
+assert.equal((await waiting).status, 'cancelled');
+assert.equal(undo, undoBefore + 1); assert.equal(globalUndo, 0);
+assert(!writes.includes('not-applied') && !writes.includes('not-queued'));
+const guardWait = deferred(), guardResume = deferred();
+const guarded = new BatchExecutor(journal(), {
+  ...platform,
+  async prepare(step, _original, guard) { if (step.stepId === 'guarded') { guardWait.resolve(); await guardResume.promise; guard(); } },
+}, 10);
+const guardedRun = guarded.submit(scope, id(21), [create('before-guard'), create('guarded')], now);
+await guardWait.promise; guarded.stop(); guardResume.resolve();
+const guardedResult = await guardedRun;
+assert.equal(guardedResult.status, 'cancelled');
+assert.deepEqual(guardedResult.steps.map(step => step.status), ['succeeded', 'skipped']);
+assert.deepEqual(guardedResult.affectedNodeIds, ['id:before-guard']);
 console.log('Batch executor: queue, refs, conflict, partial write, retries and stop OK');
 
 const resultBuild = await build({ entryPoints: ['shared/operation-result.ts'], bundle: true, format: 'esm', platform: 'node', write: false });

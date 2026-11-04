@@ -110,24 +110,25 @@ const readEffect = z.union([
 const readFont = font.extend({ variationSettings: z.record(z.string().regex(/^[\x20-\x7e]{4}$/), n).optional() });
 const readTypographyFields = { ...typographyFields, fontName: readFont.optional() };
 const textSegment = obj({ start: index, end: index, characters: z.string(), ...readTypographyFields, fills: z.array(readPaint).optional(), textStyleId: z.string().optional(), fillStyleId: z.string().optional(), boundVariables: readBindings.optional() }).refine(v => v.end >= v.start);
-const expectedFields = { name: z.string().optional(), parentId: id.optional(), children: strings.optional(), characters: z.string().optional(), textSegments: z.array(textSegment).optional(),
+const readGrid = z.discriminatedUnion('pattern', [
+  obj({ pattern: z.literal('GRID'), sectionSize: n, visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
+  obj({ pattern: z.enum(['ROWS', 'COLUMNS']), alignment: z.enum(['MIN', 'MAX', 'STRETCH', 'CENTER']), gutterSize: n, count: n, sectionSize: n.optional(), offset: n.optional(), visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
+]);
+const expectedFields = { name: z.string().optional(), parentId: id.nullable().optional(), children: strings.optional(), characters: z.string().optional(), textSegments: z.array(textSegment).optional(),
   ...common, ...appearanceFields, ...readTypographyFields, ...componentFields, layout: readLayout.optional(), constraints: constraints.optional(), layoutSizingHorizontal: layoutSizing.optional(), layoutSizingVertical: layoutSizing.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(), textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
+  width: n.nonnegative().optional(), height: n.nonnegative().optional(), fills: z.array(readPaint).optional(), strokes: z.array(readPaint).optional(), effects: z.array(readEffect).optional(),
   boundVariables: readBindings.optional(),
   description: z.string().optional(), hiddenFromPublishing: z.boolean().optional(),
   type: z.enum(['PAINT', 'TEXT', 'EFFECT', 'GRID', 'BOOLEAN', 'STRING', 'FLOAT', 'COLOR']).optional(),
-  paints: z.array(paint).optional(), layoutGrids: z.array(obj({ pattern: z.literal('GRID'), sectionSize: positive, color, visible: z.boolean().optional() })).optional(),
+  paints: z.array(readPaint).optional(), layoutGrids: z.array(readGrid).optional(), gridStyleId: z.string().optional(),
   modes: z.array(obj({ modeId: id, name: z.string() })).optional(),
-  valuesByMode: z.record(id, z.union([z.string(), z.boolean(), n, color, obj({ type: z.literal('VARIABLE_ALIAS'), id })])).optional(),
+  valuesByMode: z.record(id, z.union([variableValue, alias, composedColor])).optional(),
   variableIds: strings.optional(), explicitVariableModes: z.record(id, id).optional(),
 };
 const relatedExpected = obj(expectedFields).refine(value => Object.keys(value).length > 0, 'expected must not be empty');
 const expected = obj({ ...expectedFields, related: z.record(id, relatedExpected).optional() }).refine(value => Object.keys(value).length > 0 && (Object.keys(value).some(key => key !== 'related') || Object.keys(value.related ?? {}).length > 0), 'expected must not be empty');
 const base = { stepId: id, expected: expected.optional() };
 const step = (op: string, fields: Record<string, z.ZodType>) => obj({ ...base, op: z.literal(op), ...fields });
-const readGrid = z.discriminatedUnion('pattern', [
-  obj({ pattern: z.literal('GRID'), sectionSize: n, visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
-  obj({ pattern: z.enum(['ROWS', 'COLUMNS']), alignment: z.enum(['MIN', 'MAX', 'STRETCH', 'CENTER']), gutterSize: n, count: n, sectionSize: n.optional(), offset: n.optional(), visible: z.boolean().optional(), color: readColor.optional(), boundVariables: readBindings.optional() }),
-]);
 const bindingField = z.enum(['height', 'width', 'characters', 'itemSpacing', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'visible', 'cornerRadius', 'topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight', 'counterAxisSpacing', 'strokeWeight', 'strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight', 'opacity', 'gridRowGap', 'gridColumnGap', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'letterSpacing', 'lineHeight', 'paragraphSpacing', 'paragraphIndent']);
 const matchesVariableType = (type: string, value: unknown) => {
   if (alias.safeParse(value).success) return true;
@@ -147,7 +148,7 @@ export const nodeProjectionSchema = obj({ ...common, width: n.nonnegative().opti
   fills: z.array(readPaint).optional(), strokes: z.array(readPaint).optional(), effects: z.array(readEffect).optional(), textSegments: z.array(textSegment).optional(),
   characters: z.string().optional(), parentId: id.nullable().optional(), children: strings.optional(),
   layout: readLayout.optional(), constraints: constraints.optional(), layoutSizingHorizontal: layoutSizing.optional(), layoutSizingVertical: layoutSizing.optional(), fillStyleId: z.string().optional(), strokeStyleId: z.string().optional(),
-  textStyleId: z.string().optional(), effectStyleId: z.string().optional(),
+  textStyleId: z.string().optional(), effectStyleId: z.string().optional(), gridStyleId: z.string().optional(), layoutGrids: z.array(readGrid).optional(),
   boundVariables: readBindings.optional(), explicitVariableModes: z.record(id, id).optional(),
 });
 const readStyleValue = z.union([obj({ paints: z.array(readPaint) }), obj(readTypographyFields), obj({ effects: z.array(readEffect) }), obj({ layoutGrids: z.array(readGrid) })]);
@@ -166,6 +167,7 @@ const operations = [
   step('clonePage', { pageId: node, name: z.string().optional() }), step('movePage', { pageId: node, index }), step('deletePage', { pageId: node }),
   ...nodeTypes.map(type => step('createNode', { type: z.literal(type), ...parent, properties: properties(type) })),
   ...nodeTypes.map(type => step('updateNode', { type: z.literal(type), ...target, patch: properties(type) })),
+  ...(['COMPONENT', 'INSTANCE'] as const).map(type => step('updateNode', { type: z.literal(type), ...target, patch: properties('FRAME').omit({ layout: true }) })),
   step('cloneNode', { ...target, ...parent, index: index.optional() }), step('deleteNode', target), step('moveNode', { ...target, ...parent, index }),
   step('groupNodes', { targets: z.array(node).min(1), ...parent }), step('ungroupNode', target),
   step('setGeometry', { ...target, position: point.optional(), size: obj({ width: positive, height: positive }).optional(), rotation: n.optional() }),
@@ -222,5 +224,5 @@ export const toolInputs = {
   figma_cancel_operation: obj({ ...scoped, operationId: operationIdSchema }),
   figma_export_node: obj({ ...scoped, nodeId: id, format: z.enum(['PNG', 'SVG']), scale: positive.optional() }),
 };
-export const errorSchema = obj({ code: z.enum(['NOT_CONNECTED', 'AUTH_FAILED', 'SESSION_BUSY', 'PROTOCOL_MISMATCH', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'INVALID_ARGUMENT', 'INVALID_CURSOR', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE', 'CONFLICT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'RESOURCE_LIMIT', 'RESOURCE_EXPIRED', 'WRITE_DISABLED', 'FIGMA_API_ERROR', 'OUTCOME_UNKNOWN']), message: z.string(), failedStep: id.optional(), details: obj({ fonts: z.array(obj({ family: id.max(200), style: id.max(200) })).min(1).max(100).optional(), property: z.string().optional() }).optional(), recoveryAction: z.string() });
+export const errorSchema = obj({ code: z.enum(['NOT_CONNECTED', 'AUTH_FAILED', 'SESSION_BUSY', 'PROTOCOL_MISMATCH', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'INVALID_ARGUMENT', 'INVALID_CURSOR', 'NODE_NOT_FOUND', 'CAPABILITY_UNAVAILABLE', 'FONT_UNAVAILABLE', 'CONFLICT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'RESOURCE_LIMIT', 'RESOURCE_EXPIRED', 'WRITE_DISABLED', 'FIGMA_API_ERROR', 'OUTCOME_UNKNOWN']), message: z.string(), failedStep: id.optional(), details: obj({ fonts: z.array(obj({ family: id.max(200), style: id.max(200) })).min(1).max(100).optional(), property: z.string().optional(), reason: z.literal('VARIABLE_MODE_LIMIT').optional() }).optional(), recoveryAction: z.string() });
 export const toolErrorSchema = obj({ error: errorSchema });

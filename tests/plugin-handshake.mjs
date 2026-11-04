@@ -1,3 +1,4 @@
+import { createUIElements } from './ui-elements.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
@@ -13,6 +14,7 @@ figma.ui.onmessage({ type: 'hello-request' });
 const hello = messages.pop();
 assert.equal(hello.type, 'hello');
 assert.equal(hello.writeEnabled, false);
+assert.ok(['applyBatch', 'getOperation', 'cancel'].every(command => hello.capabilities.includes(command)));
 assert.ok(Buffer.byteLength(JSON.stringify(hello)) <= 1024);
 const welcome = { ...hello, type: 'welcome', connectionGeneration: 10 };
 figma.ui.onmessage({ ...welcome, writeEnabled: true });
@@ -59,7 +61,7 @@ assert.equal(messages.pop().error.code, 'INVALID_CURSOR');
 console.log('Main: hello, чужая сессия, welcome и отключение — OK');
 
 const html = await readFile('dist/plugin/ui.html', 'utf8');
-const elements = Object.fromEntries(['secret', 'connect', 'disconnect', 'status', 'document', 'write', 'write-status', 'stop', 'operation'].map(id => [id, { value: '', textContent: '' }]));
+const elements = createUIElements();
 const sentMain = [], sockets = [];
 class FakeSocket {
   static OPEN = 1;
@@ -69,7 +71,8 @@ class FakeSocket {
   send(value) { this.sent.push(JSON.parse(value)); }
   close() { this.readyState = 3; }
 }
-const ui = { document: { getElementById: id => elements[id] }, WebSocket: FakeSocket, parent: { postMessage: message => sentMain.push(message.pluginMessage) } };
+const ui = { setTimeout: () => 1, clearTimeout() {}, document: { hidden: false, addEventListener() {}, getElementById: id => elements[id] }, WebSocket: FakeSocket, parent: { postMessage: message => sentMain.push(message.pluginMessage) } };
+ui.window = ui; ui.addEventListener = () => {};
 runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], ui);
 elements.secret.value = 'a'.repeat(64);
 elements.connect.onclick();
