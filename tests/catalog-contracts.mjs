@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { mkdtemp, readFile, unlink, rmdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const scope = { sessionId: 's', connectionGeneration: 1 };
 const operationId = '019a4a10-0000-7000-8000-000000000001';
@@ -15,8 +18,19 @@ const calls = {
   figma_export_node: { scope, nodeId: '1:1', format: 'PNG' },
 };
 const client = new Client({ name: 'catalog-contracts', version: '0.1.0' });
+const pairingDirectory = await mkdtemp(join(tmpdir(), "figma-instructions'-"));
 try {
-  await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/server/index.js'], env: { ...process.env, FIGMA_MCP_PORT: '0' }, stderr: 'pipe' }));
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/server/index.js'], env: { ...process.env, FIGMA_MCP_PORT: '0', FIGMA_MCP_PAIRING_DIR: pairingDirectory }, stderr: 'pipe' }));
+  const instructions = client.getInstructions();
+  const keyPath = join(pairingDirectory, 'pairing-secret.txt');
+  assert.ok(instructions.includes('state=disconnected'));
+  assert.ok(instructions.includes('NOT_CONNECTED'));
+  assert.ok(instructions.includes('fijma сейчас отключена от Figma'));
+  assert.ok(instructions.includes(`Get-Content -Raw -LiteralPath '${keyPath.replaceAll("'", "''")}' | Set-Clipboard`));
+  assert.ok(instructions.includes('Подключиться и запомнить'));
+  assert.ok(instructions.includes('Сам не читай ключ'));
+  assert.ok(instructions.includes('SESSION_BUSY'));
+  assert.equal(instructions.includes(await readFile(keyPath, 'utf8')), false, 'instructions must never expose the pairing key');
   const { tools } = await client.listTools();
   assert.equal(tools.length, 10);
   const byName = Object.fromEntries(tools.map(tool => [tool.name, tool]));
@@ -46,4 +60,6 @@ try {
   console.log('MCP catalog: output schemas, disconnected calls, projection allowlists OK');
 } finally {
   await client.close();
+  await unlink(join(pairingDirectory, 'pairing-secret.txt'));
+  await rmdir(pairingDirectory);
 }

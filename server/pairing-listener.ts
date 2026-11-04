@@ -201,6 +201,11 @@ export async function createPairingListener(secret: string, port: number, diagno
     server.once('error', reject);
   });
   return { address: server.address(), getBinding: () => binding,
+    async disconnect() {
+      const socket = active;
+      if (!socket) return;
+      await new Promise<void>(resolve => { socket.once('close', resolve); socket.terminate(); });
+    },
     readDiagnostics: () => journal?.read() ?? { entries: [], extended: [], extendedEnabled: false },
     clearDiagnostics: () => { journal?.clear(); },
     async getContext() {

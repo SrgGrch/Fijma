@@ -8,9 +8,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 const transport = new StdioClientTransport({ command: process.execPath, args: ['dist/server/index.js'], env: process.env, stderr: 'pipe' });
 const client = new Client({ name: 'manual-desktop-check', version: '0.1.0' });
 const diagnostics = createInterface({ input: transport.stderr });
-diagnostics.on('line', line => {
-  if (/^(Файл сопряжения: |Локальный мост: ws:\/\/127\.0\.0\.1:)/.test(line)) process.stderr.write(`${line}\n`);
-});
+diagnostics.on('line', line => process.stderr.write(`${line}\n`));
 let directory, sequence = 0;
 async function save(base64, mimeType) {
   // Bound local export files even if a server returns more than its advertised limit.

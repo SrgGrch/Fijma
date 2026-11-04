@@ -1,5 +1,7 @@
 import { McpServer, ResourceTemplate, ProtocolError } from '@modelcontextprotocol/server';
 import type { z } from 'zod';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { toolInputs } from '../shared/contracts';
 import { contextSchema, disconnectedContext } from '../shared/context';
 import { treeOutputSchema, searchOutputSchema } from '../shared/tree-result';
@@ -28,10 +30,23 @@ const descriptions: Record<keyof typeof toolInputs, string> = {
 export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>,
   getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>, navigate?: (args: unknown) => Promise<unknown>,
   exportNode?: (args: unknown) => Promise<unknown>, readResource?: (uri: string) => { uri: string; mimeType: string; data: Buffer },
-  applyBatch?: (args: unknown) => Promise<unknown>, getOperation?: (args: unknown) => Promise<unknown>, cancelOperation?: (args: unknown) => Promise<unknown>) {
-  const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' });
+  applyBatch?: (args: unknown) => Promise<unknown>, getOperation?: (args: unknown) => Promise<unknown>, cancelOperation?: (args: unknown) => Promise<unknown>, beforeRequest?: () => void,
+  pairingPath = join(homedir(), '.figma-mcp-bridge', 'pairing-secret.txt')) {
+  const copyCommand = `Get-Content -Raw -LiteralPath '${pairingPath.replaceAll("'", "''")}' | Set-Clipboard`;
+  const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' }, {
+    instructions: [
+      'На вопросы о текущем файле Figma сначала вызывай figma_get_context; не угадывай открытый файл.',
+      'Если figma_get_context вернул state=disconnected или инструмент вернул NOT_CONNECTED, сразу сообщи: «fijma сейчас отключена от Figma», и в том же ответе дай шаги подключения, без дополнительного вопроса пользователю.',
+      `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
+      'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Figma MCP Bridge, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',
+      'Сам не читай ключ, не копируй его автоматически и не проси прислать его в чат. Не раскрывай содержимое pairing-secret.txt в MCP-ответах или сообщениях; показывай только команду для локального копирования.',
+      'SESSION_BUSY означает, что документ занят другим MCP-клиентом. В этом случае предложи закрыть его подключение и повторить запрос; не предлагай повторное сопряжение.',
+    ].join('\n'),
+  });
   if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
     { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
+      try { beforeRequest?.(); }
+      catch { throw new ProtocolError(-32000, 'SESSION_BUSY: закройте подключение другого MCP-клиента и повторите запрос.'); }
       try {
         const resource = readResource(uri.href);
         return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, blob: resource.data.toString('base64') }] };
@@ -44,6 +59,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
     }, async args => {
       let output;
       try {
+        beforeRequest?.();
         if (name === 'figma_get_context') output = contextSchema.parse(await getContext());
         else if (name === 'figma_get_tree' && getTree) output = treeOutputSchema.parse(await getTree(args));
         else if (name === 'figma_find_nodes' && findNodes) output = searchOutputSchema.parse(await findNodes(args));
@@ -61,9 +77,9 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
             recoveryAction: 'Проверьте capabilities текущего контекста.' } };
         }
       } catch (error) {
-        const code = error instanceof Error && ['NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
+        const code = error instanceof Error && ['SESSION_BUSY', 'NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
         output = { error: { code, message: code === 'RESOURCE_LIMIT' ? 'Превышен лимит запроса или ресурса.' : 'Запрос документа недоступен.',
-          recoveryAction: code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
+          recoveryAction: code === 'SESSION_BUSY' ? 'Закройте подключение другого MCP-клиента и повторите запрос.' : code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
       if (name === 'figma_export_node' && !('error' in output)) {

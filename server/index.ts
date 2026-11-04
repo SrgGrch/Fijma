@@ -1,62 +1,48 @@
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { createServer } from './catalog';
-import { createPairingFile } from './pairing-file';
-import { createPairingListener } from './pairing-listener';
-import { ExportResourceStore } from './export-resources';
-import { exportChunkBytes } from '../shared/export-wire';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { createPairingFile } from './pairing-file';
+import { createBridge } from './runtime';
+import { ipcPath } from './ipc';
+import { runBridge } from './daemon';
+import { runAdapter } from './adapter';
 
-const pairing = await createPairingFile(process.env.FIGMA_MCP_PAIRING_DIR ?? join(homedir(), '.figma-mcp-bridge'));
-let listener;
-let resources: ExportResourceStore | undefined;
 try {
-  const port = Number(process.env.FIGMA_MCP_PORT ?? 55263);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('INVALID_PORT');
-  listener = await createPairingListener(pairing.secret, port, undefined, binding => {
-    resources?.close(); resources = undefined;
-    if (binding) {
-      resources = new ExportResourceStore({ ttl: binding.limits.resourceTtl, maxEntries: 16,
-        maxBytes: binding.limits.maxExportBytes * 4, maxResourceBytes: binding.limits.maxExportBytes });
-      resources.beginSession(binding.sessionId);
+  const args = process.argv.slice(2), rawPort = process.env.FIGMA_MCP_PORT ?? '55263';
+  if (!/^\d{1,5}$/.test(rawPort) || Number(rawPort) > 65535) throw new Error('INVALID_PORT');
+  const port = Number(rawPort);
+  if (args.length > 1 || args.length === 1 && !['--bridge', '--stop-bridge'].includes(args[0]) || port === 0 && args.length) throw new Error('INVALID_ARGUMENT');
+  const directory = process.env.FIGMA_MCP_PAIRING_DIR ?? join(homedir(), '.figma-mcp-bridge');
+  const pairing = await createPairingFile(directory);
+  if (port === 0) {
+    const bridge = await createBridge(pairing, port);
+    process.stderr.write(`Файл сопряжения: ${pairing.path}\nЛокальный мост: ws://127.0.0.1:${bridge.listener.address.port}\n`);
+    const server = bridge.createClientServer();
+    server.server.onclose = () => { void bridge.close(); };
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void bridge.close().then(() => process.exit(0)); });
+    try { await server.connect(new StdioServerTransport()); }
+    catch { await bridge.close(); throw new Error('MCP_CONNECT_FAILED'); }
+  } else {
+    const path = ipcPath(await realpath(directory), port);
+    if (args[0] === '--bridge') await runBridge(pairing, port, path);
+    else {
+      if (args[0] !== '--stop-bridge') process.stderr.write(`Файл сопряжения: ${pairing.path}\nЛокальный мост: ws://127.0.0.1:${port}\n`);
+      await runAdapter(path, pairing.secret, args[0] === '--stop-bridge');
     }
-  });
-} catch {
-  await pairing.dispose();
-  process.stderr.write('Не удалось запустить локальный мост. Проверьте порт и права пользователя.\n');
-  process.exit(1);
+  }
+} catch (error) {
+  const code = error instanceof Error ? error.message : '';
+  const messages: Record<string, string> = {
+    INVALID_PORT: 'Недопустимый FIGMA_MCP_PORT: требуется целое число от 0 до 65535.',
+    INVALID_ARGUMENT: 'Допустимы --bridge или --stop-bridge; FIGMA_MCP_PORT=0 используется без аргументов.',
+    PAIRING_FILE_UNAVAILABLE: 'Файл сопряжения недоступен. Проверьте права и содержимое файла; ключ автоматически не заменяется.',
+    IPC_PATH_TOO_LONG: 'Слишком длинный путь IPC. Укажите более короткий FIGMA_MCP_PAIRING_DIR.',
+    IPC_VERSION_MISMATCH: 'Версия общего моста несовместима. Остановите прежнюю версию моста перед запуском новой.',
+    IPC_AUTH_FAILED: 'Общий мост не прошёл аутентификацию. Проверьте каталог сопряжения и перезапустите мост.',
+    BRIDGE_SPAWN_FAILED: 'Не удалось создать процесс общего моста. Проверьте доступ к Node.js.',
+    BRIDGE_START_FAILED: 'Общий мост не запустился за 8 секунд. Проверьте порт и права: если порт занят старым сервером, остановите его MCP-клиент и повторите запуск.',
+  };
+  process.stderr.write((messages[code] ?? 'Не удалось подключить локальный мост. Проверьте порт, права и состояние общего процесса.') + '\n');
+  process.exitCode = 1;
 }
-process.stderr.write(`Файл сопряжения: ${pairing.path}\n`);
-process.stderr.write(`Локальный мост: ws://127.0.0.1:${listener.address.port}\n`);
-const server = createServer(() => listener.getContext(), args => listener.getTree(args), args => listener.findNodes(args),
-  args => listener.getNodes(args), args => listener.getLocalResources(args), args => listener.navigate(args),
-  async args => {
-    const result = await listener.exportNode(args) as any;
-    if (result.error) return result;
-    const binding = listener.getBinding();
-    if (!binding || binding.sessionId !== result.sessionId || binding.connectionGeneration !== result.connectionGeneration || !resources) throw new Error('SESSION_EXPIRED');
-    const { nodeId, format, bytes, data, width, height, sessionId } = result;
-    if (format === 'PNG' && bytes <= exportChunkBytes) return { sessionId, nodeId, bytes, format, width, height, mimeType: 'image/png', data: data.toString('base64') };
-    const mimeType = format === 'PNG' ? 'image/png' : 'image/svg+xml';
-    const resource = resources.put(sessionId, data, mimeType);
-    return { sessionId, nodeId, bytes, format, mimeType, uri: resource.uri, expiresAt: resource.expiresAt,
-      ...(format === 'PNG' ? { width, height } : {}) };
-  }, uri => {
-    const binding = listener.getBinding();
-    if (!binding || !resources) throw new Error('RESOURCE_EXPIRED');
-    return resources.read(binding.sessionId, uri);
-  }, args => listener.applyBatch(args), args => listener.getOperation(args), args => listener.cancel(args));
-let closing = false;
-const close = async () => {
-  if (closing) return;
-  closing = true;
-  await listener.close();
-  resources?.close(); resources = undefined;
-  await pairing.dispose();
-};
-process.stdin.once('end', () => { void close(); });
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => {
-  void close().then(() => process.exit(0));
-});
-try { await server.connect(new StdioServerTransport()); }
-catch { await close(); process.exit(1); }

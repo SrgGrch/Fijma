@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, chmod, lstat, unlink, rmdir } from
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 async function protect(path: string, directory: boolean) {
   if (process.platform !== 'win32') { await chmod(path, directory ? 0o700 : 0o600); return; }
@@ -19,7 +20,7 @@ async function protect(path: string, directory: boolean) {
 }
 
 // A directory opts production into a persistent key; probes keep disposable keys.
-export async function createPairingFile(savedDirectory?: string) {
+async function openPairingFile(savedDirectory?: string) {
   const directory = savedDirectory ?? await mkdtemp(join(tmpdir(), 'figma-mcp-'));
   const path = join(directory, 'pairing-secret.txt');
   try {
@@ -37,5 +38,16 @@ export async function createPairingFile(savedDirectory?: string) {
   } catch {
     if (!savedDirectory) { await unlink(path).catch(() => {}); await rmdir(directory).catch(() => {}); }
     throw new Error('PAIRING_FILE_UNAVAILABLE');
+  }
+}
+
+export async function createPairingFile(savedDirectory?: string) {
+  // Concurrent adapters can observe a new file before its write or Windows ACL update completes.
+  for (let attempt = 0; ; attempt++) {
+    try { return await openPairingFile(savedDirectory); }
+    catch (error) {
+      if (!savedDirectory || attempt === 3) throw error;
+      await delay(50 * (attempt + 1));
+    }
   }
 }

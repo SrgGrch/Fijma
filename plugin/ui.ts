@@ -132,7 +132,8 @@ window.addEventListener('pagehide', () => { automatic = false; cancelRetry(); co
 write.onchange = () => { if (ready) controller.setWriteEnabled(write.checked); };
 stop.onclick = () => { if (ready) controller.stop(); };
 onmessage = event => {
-  if (event.source && event.source !== parent) return;
+  // Figma Desktop can deliver main messages from the top-level host rather than the direct parent.
+  if (event.source && event.source !== parent && event.source !== window.top) return;
   const raw = event.data?.pluginMessage;
   if (typeof raw?.type === 'string' && raw.type.startsWith('pairing-')) {
     const parsed = pairingReplySchema.safeParse(raw);

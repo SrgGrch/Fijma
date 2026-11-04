@@ -94,18 +94,30 @@ function uiFixture() {
   const document = { hidden: false, getElementById: id => elements[id], addEventListener: (type, callback) => { listeners[type] = callback; } };
   const ui = { document, WebSocket: Socket, parent: { postMessage: ({ pluginMessage }) => messages.push(pluginMessage) },
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; }, clearTimeout(id) { timers.delete(id); } };
-  ui.window = { addEventListener: (type, callback) => { windowListeners[type] = callback; } };
+  ui.window = { top: {}, addEventListener: (type, callback) => { windowListeners[type] = callback; } };
   runInNewContext(uiBuild.outputFiles[0].text, ui);
-  const fromMain = message => ui.onmessage({ data: { pluginMessage: message } });
-  const bind = (socket = sockets.at(-1), generation = 1) => {
+  const fromMain = (message, source) => ui.onmessage({ source, data: { pluginMessage: message } });
+  const bind = (socket = sockets.at(-1), generation = 1, source) => {
     socket.onopen(); socket.onmessage({ data: JSON.stringify({ type: 'paired' }) });
     const hello = { type: 'hello', protocolVersion: 1, sessionId: 's', capabilities: ['getContext', 'applyBatch'], limits: bootstrapLimits, writeEnabled: false };
-    fromMain(hello);
+    fromMain(hello, source);
     socket.onmessage({ data: JSON.stringify({ ...hello, type: 'welcome', connectionGeneration: generation }) });
-    fromMain({ type: 'bound', sessionId: 's', connectionGeneration: generation, documentLabel: '<Untrusted>', writeEnabled: false, message: 'Ready' });
+    fromMain({ type: 'bound', sessionId: 's', connectionGeneration: generation, documentLabel: '<Untrusted>', writeEnabled: false, message: 'Ready' }, source);
   };
   const fireTimer = () => { const [id, timer] = timers.entries().next().value; timers.delete(id); timer.callback(); };
   return { elements, messages, sockets, timers, listeners, windowListeners, document, fromMain, bind, fireTimer, ui };
+}
+for (const sourceKind of ['top', 'parent', 'null']) {
+  const h = uiFixture();
+  const source = sourceKind === 'top' ? h.ui.window.top : sourceKind === 'parent' ? h.ui.parent : null;
+  h.fromMain({ type: 'pairing-loaded', secret: token }, {});
+  assert.equal(h.sockets.length, 0, 'foreign frames cannot inject a saved key');
+  h.fromMain({ type: 'pairing-loaded', secret: token }, source);
+  assert.equal(h.sockets.length, 1, `${sourceKind}: main message must reach UI`);
+  h.bind(undefined, 1, source);
+  assert.equal(h.sockets[0].sent.at(-1).type, 'hello', `${sourceKind}: hello must reach the server`);
+  assert.equal(h.elements.connection.dataset.state, 'ready');
+  assert.equal(h.elements.write.checked, false);
 }
 {
   const h = uiFixture();
