@@ -1,5 +1,6 @@
 import { batchSchema } from './contracts';
 import { OperationJournal } from './operation-journal';
+import { ExecutionQueue, type QueueJob } from './execution-queue';
 import type { BatchStep } from './batch-refs';
 
 type Changes = { nodeIds: string[]; resourceIds: string[]; details?: unknown[] };
@@ -7,7 +8,7 @@ type Outputs = Partial<Record<'nodeId' | 'styleId' | 'collectionId' | 'modeId' |
 type StepResult = { stepId: string; status: 'succeeded' | 'failed' | 'skipped'; outputs: Outputs; appliedChanges: Changes; error?: Failure };
 type Failure = { code: string; message: string; failedStep?: string; details?: unknown; recoveryAction: string };
 type Scope = { sessionId: string; connectionGeneration: number };
-type Job = { cancelled: boolean; steps: BatchStep[]; scope: Scope; operationId: string };
+type Job = QueueJob & { steps: BatchStep[]; scope: Scope; operationId: string };
 type Platform = {
   checkScope(scope: Scope): void;
   preflight?(step: BatchStep): void;
@@ -50,9 +51,9 @@ function resolve(step: BatchStep, previous: Map<string, Outputs>): BatchStep {
 
 // One instance and journal belong to one live plugin session.
 export class BatchExecutor {
-  private tail: Promise<void> = Promise.resolve();
-  private jobs = new Map<string, Job>();
-  constructor(private journal: OperationJournal, private platform: Platform, private maxQueuedOperations: number) {
+  private queue: ExecutionQueue;
+  constructor(private journal: OperationJournal, private platform: Platform, private maxQueuedOperations: number, queue?: ExecutionQueue) {
+    this.queue = queue ?? new ExecutionQueue(maxQueuedOperations);
     if (!Number.isSafeInteger(maxQueuedOperations) || maxQueuedOperations < 1) throw new Error('INVALID_ARGUMENT');
   }
   get(operationId: string) { return this.journal.get(operationId); }
@@ -66,21 +67,16 @@ export class BatchExecutor {
     const steps = batchSchema.parse(input) as BatchStep[];
     for (const step of steps) this.platform.preflight?.(step);
     // A retry must remain available even when the queue is full.
-    if (!this.journal.has(operationId) && this.jobs.size >= this.maxQueuedOperations) throw new Error('RESOURCE_LIMIT');
+    if (!this.journal.has(operationId) && this.queue.size >= this.maxQueuedOperations) throw new Error('RESOURCE_LIMIT');
     const reservation = this.journal.reserve(operationId, { command: 'figma_apply_batch', params: { steps } }, now);
     if (!reservation.fresh) return Promise.resolve(reservation);
-    const job: Job = { scope, operationId, steps, cancelled: false };
-    this.jobs.set(operationId, job);
-    const run = this.tail.then(() => this.run(job));
-    this.tail = run.then(() => undefined, () => undefined);
-    return run;
+    return this.queue.enqueue(operationId, 'batch', job => this.run(Object.assign(job, { scope, operationId, steps })));
   }
   cancel(operationId: string) {
-    const job = this.jobs.get(operationId);
-    if (job) job.cancelled = true;
+    this.queue.cancel(operationId);
     return this.get(operationId);
   }
-  stop() { for (const job of this.jobs.values()) job.cancelled = true; }
+  stop() { this.queue.stop('batch'); }
   private async run(job: Job) {
     const { operationId, scope, steps } = job;
     const results: StepResult[] = [];
@@ -135,7 +131,6 @@ export class BatchExecutor {
     }
     const result = { operationId, ...scope, status, steps: results, affectedNodeIds, affectedResourceIds, warnings: [], ...(failure ? { error: failure } : {}) };
     this.journal.update(operationId, status, result);
-    this.jobs.delete(operationId);
     return result;
   }
 }

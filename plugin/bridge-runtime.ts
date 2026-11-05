@@ -13,6 +13,8 @@ import { BatchExecutor } from '../shared/batch-executor';
 import { OperationJournal } from '../shared/operation-journal';
 import { writeOperations } from './write-operations';
 import { verifyWrite } from './write-verification';
+import { ExecutionQueue } from '../shared/execution-queue';
+import { TrustedExecution } from './trusted-execution';
 
 export function createBridgeRuntime(diagnostic?: { run: (command: any, scope: { sessionId: string; connectionGeneration: number }, checkScope: () => void) => Promise<unknown> }, candidate = false) {
 const documentRoot = figma.root;
@@ -20,13 +22,16 @@ const checkDocument = () => { if (figma.root !== documentRoot) throw new Error('
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel'] : [])];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel', 'execute'] : [])];
 let writeEnabled = false;
+let executeEnabled = false;
 let limits = bootstrapLimits;
 const operations = writeOperations(figma, () => limits, () => scheduler.wait());
 let previousParents: string[] = [];
 let previousGroups: string[] = [];
-const executor = new BatchExecutor(new OperationJournal(bootstrapLimits), {
+const journal = new OperationJournal(bootstrapLimits);
+const queue = new ExecutionQueue(bootstrapLimits.maxQueuedOperations);
+const executor = new BatchExecutor(journal, {
   ...operations,
   yieldControl: () => scheduler.wait(),
   async prepare(step, original, guard) {
@@ -49,8 +54,15 @@ const executor = new BatchExecutor(new OperationJournal(bootstrapLimits), {
     return verifyWrite(figma, step, changes, previousParents, { ...limits, maxBatchSteps: stepCount }, checkDocument, previousGroups);
   },
   commitUndo() { checkDocument(); figma.commitUndo(); },
-}, bootstrapLimits.maxQueuedOperations);
+}, bootstrapLimits.maxQueuedOperations, queue);
+const trusted = new TrustedExecution(journal, queue, {
+  figma,
+  checkScope(scope) { checkDocument(); if (scope.sessionId !== sessionId || scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); if (!executeEnabled) throw new Error('EXECUTION_DISABLED'); },
+  yieldControl: () => scheduler.wait(),
+  commitUndo: () => figma.commitUndo(),
+}, bootstrapLimits.maxQueuedOperations, bootstrapLimits.operationTimeout);
 const snapshot = (operationId: string, scope: { sessionId: string; connectionGeneration: number }, value: any) => value.result ?? { operationId, ...scope, status: value.status, steps: [], affectedNodeIds: [], affectedResourceIds: [], warnings: [] };
+const executeSnapshot = (operationId: string, scope: { sessionId: string; connectionGeneration: number }, value: any) => value.result ?? { operationId, ...(journal.scope(operationId) as typeof scope ?? scope), kind: 'execute', status: value.status, effects: value.status === 'queued' ? 'none' : 'unknown', logs: [], logsTruncated: false, warnings: [] };
 const scheduler = createUIYield(message => figma.ui.postMessage(message));
 let pager = new TreePager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
 let search = new SearchPager({ maxDepth: 8, maxNodes: 1000, maxResponseBytes: 32768, chunkSize: 50 }, 100, 60000);
@@ -76,12 +88,18 @@ return async (message: any) => {
     figma.ui.postMessage({ type: 'writeState', enabled: writeEnabled, ...(!writeEnabled && message.enabled ? { reason: 'CAPABILITY_UNAVAILABLE' } : {}) });
     return;
   }
+  if (message.type === 'setExecuteEnabled' && typeof message.enabled === 'boolean' && Object.keys(message).length === 2) {
+    executeEnabled = candidate && message.enabled && connectionGeneration !== undefined;
+    if (!executeEnabled) queue.stop('execute');
+    figma.ui.postMessage({ type: 'executeState', enabled: executeEnabled, ...(!executeEnabled && message.enabled ? { reason: 'CAPABILITY_UNAVAILABLE' } : {}) });
+    return;
+  }
   if (message.type === 'stop' && Object.keys(message).length === 1) {
-    writeEnabled = false; executor.stop(); figma.ui.postMessage({ type: 'writeState', enabled: false }); return;
+    writeEnabled = false; executeEnabled = false; queue.stop(); figma.ui.postMessage({ type: 'writeState', enabled: false }); figma.ui.postMessage({ type: 'executeState', enabled: false }); return;
   }
   if (message.type === 'hello-request' && Object.keys(message).length === 1) {
     awaitingWelcome = true;
-    writeEnabled = false; executor.stop();
+    writeEnabled = false; executeEnabled = false; queue.stop();
     connectionGeneration = undefined;
     pager.clear(); search.clear(); resources.clear(); scheduler.release();
     figma.ui.postMessage({ type: 'hello', protocolVersion: PROTOCOL_VERSION, sessionId,
@@ -106,10 +124,11 @@ return async (message: any) => {
       writeEnabled: Boolean(diagnostic), message: diagnostic ? 'Диагностика: разрешено только создание тестового маркера.' : 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
   } else if (message.type === 'disconnected' && Object.keys(message).length === 1) {
     awaitingWelcome = false;
-    writeEnabled = false; executor.stop();
+    writeEnabled = false; executeEnabled = false; queue.stop();
     connectionGeneration = undefined;
     pager.clear(); search.clear(); resources.clear(); scheduler.release();
   } else if (message.type === 'getContext') {
+    if (queue.hasExecute) { figma.ui.postMessage({ type: 'error', code: 'RESOURCE_LIMIT' }); return; }
     if (jsonMessageBytes(message) > limits.maxMessageBytes) { figma.ui.postMessage({ type: 'error', code: 'RESOURCE_LIMIT' }); return; }
     const request = contextRequestSchema.safeParse(message);
     if (!request.success || request.data.sessionId !== sessionId || request.data.connectionGeneration !== connectionGeneration) {
@@ -118,7 +137,7 @@ return async (message: any) => {
     }
     try { checkDocument(); } catch { figma.ui.postMessage({ type: 'error', code: 'DOCUMENT_MISMATCH' }); return; }
     figma.ui.postMessage({ type: 'context', requestId: request.data.requestId, sessionId, connectionGeneration,
-      document: { documentLabel: figma.root.name, pages: figma.root.children.map(page => ({ id: page.id, name: page.name })),
+      document: { documentLabel: figma.root.name, ...(typeof figma.editorType === 'string' ? { editorType: figma.editorType } : {}), pages: figma.root.children.map(page => ({ id: page.id, name: page.name })),
         currentPageId: figma.currentPage.id, selection: figma.currentPage.selection.map(node => node.id) } });
   } else if (message.type === 'command') {
     let command;
@@ -126,11 +145,11 @@ return async (message: any) => {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       checkDocument();
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
-      if (reading && !['applyBatch', 'getOperation', 'cancel'].includes(command.command)) throw new Error('RESOURCE_LIMIT');
-    } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && error.message === 'DOCUMENT_MISMATCH' ? 'DOCUMENT_MISMATCH' : 'INVALID_ARGUMENT' }); return; }
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel', 'execute'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (reading && !['applyBatch', 'getOperation', 'cancel'].includes(command.command) || queue.hasExecute && !['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) throw new Error('RESOURCE_LIMIT');
+    } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && ['DOCUMENT_MISMATCH', 'SESSION_EXPIRED', 'RESOURCE_LIMIT', 'CAPABILITY_UNAVAILABLE'].includes(error.message) ? error.message : 'INVALID_ARGUMENT' }); return; }
     const scope = { sessionId, connectionGeneration };
-    if (candidate && ['applyBatch', 'getOperation', 'cancel'].includes(command.command)) {
+    if (candidate && ['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) {
       try {
         if (jsonMessageBytes(message) > limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
         let data;
@@ -139,13 +158,41 @@ return async (message: any) => {
           if (steps.length > limits.maxBatchSteps) throw new Error('RESOURCE_LIMIT');
           data = await executor.submit(scope, command.operationId, steps, Date.now());
           if (data && 'fresh' in data) data = snapshot(command.operationId, scope, data);
+        } else if (command.command === 'execute') {
+          data = await trusted.submit(scope, command.operationId, command.params as any, Date.now());
+          if (data && 'fresh' in data) data = executeSnapshot(command.operationId, scope, data);
         } else {
           const value = command.command === 'cancel' ? executor.cancel(command.operationId) : executor.get(command.operationId);
-          data = snapshot(command.operationId, scope, value);
+          data = journal.kind(command.operationId) === 'figma_execute' ? executeSnapshot(command.operationId, scope, value) : snapshot(command.operationId, scope, value);
         }
-        if (scope.connectionGeneration === connectionGeneration) figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data });
+        if (scope.connectionGeneration === connectionGeneration) {
+          const envelope = { ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}) };
+          if (data?.kind === 'execute') {
+            try {
+              if ('value' in data && jsonMessageBytes({ type: 'operationResult', ...envelope, data }) > limits.maxResponseBytes) {
+                if (!message.requestId) throw new Error('RESOURCE_LIMIT');
+                const { value, ...metadata } = data;
+                const pending = { ...metadata, valueResourcePending: true };
+                if (jsonMessageBytes({ type: 'operationResult', ...envelope, data: pending }) > limits.maxResponseBytes) throw new Error('RESOURCE_LIMIT');
+                const encoded = unescape(encodeURIComponent(JSON.stringify(value)));
+                const bytes = Uint8Array.from(encoded, c => c.charCodeAt(0));
+                const chunkBytes = Math.min(12288, Math.floor((limits.maxMessageBytes - jsonMessageBytes({ type: 'executionChunk', ...envelope, index: 999999, total: 999999, data: '' })) / 4) * 3);
+                if (chunkBytes < 3) throw new Error('RESOURCE_LIMIT');
+                const total = Math.ceil(bytes.length / chunkBytes);
+                figma.ui.postMessage({ type: 'executionStart', ...envelope, bytes: bytes.length, total, chunkBytes });
+                for (let index = 0; index < total; index++) figma.ui.postMessage({ type: 'executionChunk', ...envelope, index, total, data: figma.base64Encode(bytes.slice(index * chunkBytes, (index + 1) * chunkBytes)) });
+                data = pending;
+              }
+              if (jsonMessageBytes({ type: 'operationResult', ...envelope, data }) > limits.maxResponseBytes) throw new Error('RESOURCE_LIMIT');
+            } catch {
+              data = { operationId: command.operationId, ...scope, kind: 'execute', status: 'unknown', effects: 'unknown', logs: [], logsTruncated: true, warnings: [],
+                error: { code: 'RESOURCE_LIMIT', phase: 'transfer', message: 'Execution result could not be transferred.', recoveryAction: 'Inspect the document and operation status before retrying.' } };
+            }
+          }
+          figma.ui.postMessage({ type: 'operationResult', ...envelope, data });
+        }
       } catch (error) {
-        const code = error instanceof Error && ['WRITE_DISABLED', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'RESOURCE_LIMIT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'CAPABILITY_UNAVAILABLE'].includes(error.message) ? error.message : 'INVALID_ARGUMENT';
+        const code = error instanceof Error && ['EXECUTION_DISABLED', 'WRITE_DISABLED', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'RESOURCE_LIMIT', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'CAPABILITY_UNAVAILABLE'].includes(error.message) ? error.message : 'INVALID_ARGUMENT';
         figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data: { error: { code, message: code, recoveryAction: 'Check operation and document state.' } } });
       }
       return;

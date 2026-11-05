@@ -1,5 +1,5 @@
 export type OperationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'partially_applied' | 'cancelled' | 'unknown';
-type Entry = { fingerprint: string; createdAt: number; status: OperationStatus; result?: unknown };
+type Entry = { fingerprint: string; command: string; scope?: unknown; createdAt: number; status: OperationStatus; result?: unknown };
 
 // Payloads come from the JSON protocol; sorting keys makes property order immaterial.
 function canonical(value: unknown): string {
@@ -41,7 +41,7 @@ export class OperationJournal {
       if (now - entry.createdAt > this.limits.dedupTtl + this.limits.clockSkew && entry.status !== 'queued' && entry.status !== 'running') this.entries.delete(id);
     }
     if (this.entries.size >= this.limits.maxJournalEntries) throw new Error('RESOURCE_LIMIT');
-    this.entries.set(operationId, { createdAt, fingerprint, status: 'queued' });
+    this.entries.set(operationId, { createdAt, fingerprint, command: payload.command, scope: (payload.params as any)?.scope, status: 'queued' });
     return { fresh: true, status: 'queued' as OperationStatus };
   }
 
@@ -55,6 +55,9 @@ export class OperationJournal {
     this.timestamp(operationId);
     return this.entries.has(operationId);
   }
+
+  kind(operationId: string) { return this.entries.get(operationId)?.command; }
+  scope(operationId: string) { return this.entries.get(operationId)?.scope; }
 
   update(operationId: string, status: OperationStatus, result?: unknown) {
     const entry = this.entries.get(operationId);
