@@ -10,6 +10,9 @@ import { exportStartSchema, exportChunkSchema, exportErrorSchema } from '../shar
 import { ExportTransfer } from './export-transfer';
 import { createDiagnosticsSession } from './diagnostics-session';
 import { safeError as sanitizeError } from './safe-error';
+import { compileExecution } from './execution-compiler';
+import { ExecutionTransfer } from './execution-transfer';
+import { executionLimits } from '../shared/execution-limits';
 
 const pairSchema = z.strictObject({ type: z.literal('pair'), secret: z.string().length(64).regex(/^[0-9a-f]+$/) });
 const operationId = () => {
@@ -31,7 +34,10 @@ export async function createPairingListener(secret: string, port: number, diagno
   let binding: ReturnType<typeof negotiateHello> | undefined;
   let journal: ReturnType<typeof createDiagnosticsSession> | undefined;
   let contextRead = false;
-  const operations = new Map<string, { id: string; action: 'applyBatch' | 'getOperation' | 'cancel'; resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; started: number }>();
+  let executeEnabled = false;
+  const operations = new Map<string, { id: string; action: 'applyBatch' | 'getOperation' | 'cancel' | 'execute'; resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; started: number; transfer?: ExecutionTransfer; resource?: Buffer }>();
+  const unfinished = new Set<string>();
+  let orphanedSession: string | undefined;
   type ReadAction = 'getContext' | 'getTree' | 'findNodes' | 'getNodes' | 'getLocalResources' | 'navigate' | 'exportNode';
   function deferred(action: ReadAction, id: string) {
     const current = journal, started = performance.now();
@@ -85,7 +91,7 @@ export async function createPairingListener(secret: string, port: number, diagno
   server.on('connection', socket => {
     unauthenticated.add(socket);
     const timer = setTimeout(() => socket.terminate(), 5000);
-    const release = () => { clearTimeout(timer); unauthenticated.delete(socket); if (active === socket) { active = undefined; binding = undefined; contextRead = false; late.clear(); draining = undefined; failPending(); for (const operation of operations.values()) { clearTimeout(operation.timer); operation.reject(new Error('OUTCOME_UNKNOWN')); } operations.clear(); journal?.close(); journal = undefined; onBinding?.(); } };
+    const release = () => { clearTimeout(timer); unauthenticated.delete(socket); if (active === socket) { if (unfinished.size && binding) orphanedSession = binding.sessionId; unfinished.clear(); active = undefined; binding = undefined; contextRead = false; executeEnabled = false; late.clear(); draining = undefined; failPending(); for (const operation of operations.values()) { clearTimeout(operation.timer); operation.reject(new Error('OUTCOME_UNKNOWN')); } operations.clear(); journal?.close(); journal = undefined; onBinding?.(); } };
     socket.on('close', release);
     socket.on('error', () => { release(); socket.terminate(); });
     socket.once('message', (bytes, binary) => {
@@ -104,6 +110,8 @@ export async function createPairingListener(secret: string, port: number, diagno
         try {
           if (binary) throw new Error('PROTOCOL_MISMATCH');
           const welcome = negotiateHello(JSON.parse(data.toString()), currentGeneration, Boolean(diagnostic));
+          if (orphanedSession && welcome.sessionId === orphanedSession) { socket.close(1008, 'SESSION_BUSY'); return; }
+          orphanedSession = undefined;
           binding = welcome;
           if (!diagnostic) journal = createDiagnosticsSession({ sessionId: welcome.sessionId, connectionGeneration: welcome.connectionGeneration }, secret, process.env);
           onBinding?.(welcome);
@@ -128,21 +136,48 @@ export async function createPairingListener(secret: string, port: number, diagno
                 if (state.sessionId !== binding.sessionId || state.connectionGeneration !== binding.connectionGeneration || state.enabled && !binding.capabilities.includes('applyBatch')) throw new Error('SESSION_EXPIRED');
                 binding = { ...binding, writeEnabled: state.enabled }; return;
               }
+              if (!diagnostic && message?.type === 'executeState') {
+                const state = z.strictObject({ type: z.literal('executeState'), sessionId: z.string(), connectionGeneration: z.number().int().positive(), enabled: z.boolean(), reason: z.string().optional() }).parse(message);
+                if (state.sessionId !== binding.sessionId || state.connectionGeneration !== binding.connectionGeneration || state.enabled && !binding.capabilities.includes('execute')) throw new Error('SESSION_EXPIRED');
+                executeEnabled = state.enabled; return;
+              }
               if (!diagnostic && message?.type === 'ack') { if (!operations.has(message.requestId)) return; validateAck(message, { sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration, operationId: operations.get(message.requestId)!.id }); return; }
+              if (!diagnostic && (message?.type === 'executionStart' || message?.type === 'executionChunk')) {
+                const operation = operations.get(message.requestId);
+                if (!operation) return;
+                operation.transfer ??= new ExecutionTransfer({ sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration, operationId: operation.id, requestId: message.requestId });
+                const result = operation.transfer.accept(message);
+                if (result) operation.resource = result;
+                return;
+              }
               if (!diagnostic && message?.type === 'operationResult') {
                 const reply = operationReplySchema.parse(message);
                 if (reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const operation = operations.get(reply.requestId ?? '');
-                if (!operation) return;
+                if (!operation) {
+                  if ('operationId' in reply.data && 'kind' in reply.data && reply.data.kind === 'execute' && !['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
+                  return;
+                }
                 if (operation.id !== reply.operationId) throw new Error('PROTOCOL_MISMATCH');
+                if ('operationId' in reply.data && 'kind' in reply.data && reply.data.kind === 'execute' && Boolean(reply.data.valueResourcePending) !== Boolean(operation.resource)) throw new Error('PROTOCOL_MISMATCH');
                 operations.delete(reply.requestId!); clearTimeout(operation.timer);
                 const timing = { operationId: reply.operationId, durationMs: performance.now() - operation.started };
                 if ('operationId' in reply.data) {
+                  if ('kind' in reply.data && reply.data.kind === 'execute') {
+                    if (!['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
+                    const error = reply.data.error;
+                    operation.resolve({ ...reply.data, ...(error ? { error: { ...safeError(error), ...(error.phase ? { phase: error.phase } : {}), ...(error.line ? { line: error.line } : {}), ...(error.column ? { column: error.column } : {}) } } : {}), ...(operation.resource ? { executionResourceData: operation.resource } : {}) });
+                    return;
+                  }
                   journal?.operationCompleted(operation.action, timing, reply.data);
                   const data = { ...reply.data, warnings: [], ...(reply.data.error ? { error: safeError(reply.data.error) } : {}),
                     steps: reply.data.steps.map(step => ({ ...step, ...(step.error ? { error: safeError(step.error) } : {}) })) };
                   operation.resolve(data);
-                } else { journal?.failed(operation.action, timing, reply.data.error.code); operation.resolve({ error: safeError(reply.data.error) }); }
+                } else {
+                  if (operation.action === 'execute' && reply.data.error.code !== 'OPERATION_ID_CONFLICT' && ![...operations.values()].some(item => item.action === 'execute' && item.id === operation.id)) unfinished.delete(operation.id);
+                  if (operation.action !== 'execute') journal?.failed(operation.action, timing, reply.data.error.code);
+                  operation.resolve({ error: safeError(reply.data.error) });
+                }
                 return;
               }
               const schemas = { tree: treeReplySchema, search: searchReplySchema, nodes: nodesReplySchema, resources: resourcesReplySchema, navigate: navigateReplySchema };
@@ -187,7 +222,9 @@ export async function createPairingListener(secret: string, port: number, diagno
               const reply = contextReplySchema.parse(message);
               if (!binding || !pending || reply.requestId !== pending.id || reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
               const result = contextSchema.parse({ ...reply.document, state: 'ready', sessionId: binding.sessionId,
-                connectionGeneration: binding.connectionGeneration, writeEnabled: binding.writeEnabled, capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel'].includes(item)), limits: binding.limits });
+                connectionGeneration: binding.connectionGeneration, writeEnabled: binding.writeEnabled, executeEnabled,
+                ...(binding.capabilities.includes('execute') ? { execution: { mode: 'trusted', readOnlyEnforced: false, hardTimeout: false, editorType: reply.document.editorType ?? 'unknown', documentAccess: 'dynamic-page', typingsVersion: '1.142.0', runtimeSupport: 'unknown', limits: executionLimits } } : {}),
+                capabilities: binding.capabilities.filter(item => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel', 'execute'].includes(item)), limits: binding.limits });
               const current = pending; pending = undefined; clearTimeout(current.timer); remember(current.kind, current.id);
               contextRead = true; current.resolve(result);
             } catch { socket.close(1008, 'PROTOCOL_MISMATCH'); }
@@ -200,7 +237,7 @@ export async function createPairingListener(secret: string, port: number, diagno
     server.once('listening', resolve);
     server.once('error', reject);
   });
-  return { address: server.address(), getBinding: () => binding,
+  return { address: server.address(), getBinding: () => binding, hasOrphanedExecution: () => Boolean(orphanedSession),
     async disconnect() {
       const socket = active;
       if (!socket) return;
@@ -210,6 +247,7 @@ export async function createPairingListener(secret: string, port: number, diagno
     clearDiagnostics: () => { journal?.clear(); },
     async getContext() {
     if (!active || !binding || !binding.capabilities.includes('getContext')) return disconnectedContext;
+    if (unfinished.size) throw new Error('RESOURCE_LIMIT');
     if (drainingActive()) throw new Error('RESOURCE_LIMIT');
     if (pending) {
       if (pending.kind !== 'context') throw new Error('RESOURCE_LIMIT');
@@ -225,35 +263,42 @@ export async function createPairingListener(secret: string, port: number, diagno
   }, async getTree(raw: unknown) { return read('getTree', raw); }, async findNodes(raw: unknown) { return read('findNodes', raw); },
     async getNodes(raw: unknown) { return read('getNodes', raw); }, async getLocalResources(raw: unknown) { return read('getLocalResources', raw); },
     async navigate(raw: unknown) { return read('navigate', raw); }, async exportNode(raw: unknown) { return read('exportNode', raw); },
-    async applyBatch(raw: unknown) { return execute('applyBatch', raw); }, async getOperation(raw: unknown) { return execute('getOperation', raw); }, async cancel(raw: unknown) { return execute('cancel', raw); }, async close() {
+    async applyBatch(raw: unknown) { return execute('applyBatch', raw); }, async execute(raw: unknown) { return execute('execute', raw); }, async getOperation(raw: unknown) { return execute('getOperation', raw); }, async cancel(raw: unknown) { return execute('cancel', raw); }, async close() {
     failPending(); for (const operation of operations.values()) { clearTimeout(operation.timer); operation.reject(new Error('OUTCOME_UNKNOWN')); } operations.clear(); journal?.close(); journal = undefined;
     for (const client of server.clients) client.terminate();
     await new Promise<void>(resolve => server.close(() => resolve()));
   } };
 
-  async function execute(command: 'applyBatch' | 'getOperation' | 'cancel', raw: unknown) {
+  async function execute(command: 'applyBatch' | 'getOperation' | 'cancel' | 'execute', raw: unknown) {
     if (!active || !binding) throw new Error('NOT_CONNECTED');
-    const schema = { applyBatch: toolInputs.figma_apply_batch, getOperation: toolInputs.figma_get_operation, cancel: toolInputs.figma_cancel_operation }[command];
+    const schema = { applyBatch: toolInputs.figma_apply_batch, getOperation: toolInputs.figma_get_operation, cancel: toolInputs.figma_cancel_operation, execute: toolInputs.figma_execute }[command];
     const input = schema.parse(raw);
     if (input.scope.sessionId !== binding.sessionId || input.scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
     if (!binding.capabilities.includes(command)) throw new Error('CAPABILITY_UNAVAILABLE');
-    if (command === 'applyBatch' && !contextRead) throw new Error('SESSION_EXPIRED');
+    if ((command === 'applyBatch' || command === 'execute') && !contextRead) throw new Error('SESSION_EXPIRED');
+    if (command === 'execute' && (pending || drainingActive())) throw new Error('RESOURCE_LIMIT');
     if (operations.size >= binding.limits.maxQueuedOperations + 2) throw new Error('RESOURCE_LIMIT');
     const { scope, operationId: id, ...params } = input;
     const requestId = randomUUID();
-    const wire = JSON.stringify({ type: 'command', ...scope, operationId: id, requestId, command, params });
+    if (command === 'execute' && (utf8Bytes((params as any).code) > 32768 || utf8Bytes(JSON.stringify((params as any).args ?? null)) > 8192)) throw new Error('RESOURCE_LIMIT');
+    const compiledCode = command === 'execute' ? await compileExecution((params as any).language, (params as any).code) : undefined;
+    if (!active || !binding || scope.sessionId !== binding.sessionId || scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
+    if (command === 'execute' && (pending || drainingActive())) throw new Error('RESOURCE_LIMIT');
+    const wire = JSON.stringify({ type: 'command', ...scope, operationId: id, requestId, command, params: compiledCode === undefined ? params : { ...params, compiledCode } });
     if (utf8Bytes(wire) > binding.limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
     const started = performance.now();
     const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => { operations.delete(requestId); journal?.failed(command, { operationId: id, durationMs: performance.now() - started }, 'OUTCOME_UNKNOWN'); reject(new Error('OUTCOME_UNKNOWN')); }, binding!.limits.operationTimeout);
+      const timer = setTimeout(() => { operations.delete(requestId); if (command !== 'execute') journal?.failed(command, { operationId: id, durationMs: performance.now() - started }, 'OUTCOME_UNKNOWN'); reject(new Error('OUTCOME_UNKNOWN')); }, binding!.limits.operationTimeout);
       operations.set(requestId, { id, action: command, resolve, reject, timer, started });
     });
+    if (command === 'execute') unfinished.add(id);
     active.send(wire);
     return promise;
   }
 
   async function read(command: 'getTree' | 'findNodes' | 'getNodes' | 'getLocalResources' | 'navigate' | 'exportNode', raw: unknown) {
     if (!active || !binding) throw new Error('NOT_CONNECTED');
+    if (unfinished.size) throw new Error('RESOURCE_LIMIT');
     if (drainingActive()) throw new Error('RESOURCE_LIMIT');
     const inputs = { getTree: toolInputs.figma_get_tree, findNodes: toolInputs.figma_find_nodes,
       getNodes: toolInputs.figma_get_nodes, getLocalResources: toolInputs.figma_get_local_resources, navigate: toolInputs.figma_navigate, exportNode: toolInputs.figma_export_node };

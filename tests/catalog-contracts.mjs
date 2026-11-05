@@ -9,6 +9,7 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/valida
 const scope = { sessionId: 's', connectionGeneration: 1 };
 const operationId = '019a4a10-0000-7000-8000-000000000001';
 const calls = {
+  figma_execute: { scope, operationId, language: 'javascript', code: 'return 1;' },
   figma_get_tree: { scope, rootId: '0:1', depth: 1, limit: 10 },
   figma_find_nodes: { scope, document: true, limit: 10 },
   figma_get_nodes: { scope, nodeIds: ['1:1'], fields: ['name'] },

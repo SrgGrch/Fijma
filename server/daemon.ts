@@ -23,7 +23,7 @@ export async function runBridge(pairing: Awaited<ReturnType<typeof createPairing
       if (action === 'stop') { await close(socket); return; }
       if (closing || socket.destroyed) { socket.destroy(); return; }
       const server = bridge.createClientServer(() => {
-        if (closing || releasing || socket.destroyed || socket.readableEnded || owner && owner !== socket) throw new Error('SESSION_BUSY');
+        if (closing || releasing || bridge.listener.hasOrphanedExecution() || socket.destroyed || socket.readableEnded || owner && owner !== socket) throw new Error('SESSION_BUSY');
         owner = socket;
       });
       server.server.onclose = () => {
