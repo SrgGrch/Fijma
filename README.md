@@ -2,7 +2,7 @@
 
 English | [Русский](README.ru.md)
 
-A local MCP bridge for reading and editing an open Design file in Figma Desktop. The MCP client gets structured tools for nodes, pages, local styles and variables, batch changes, and PNG/SVG exports. The bridge does not execute arbitrary code from requests.
+A local MCP bridge for reading and editing an open Design file in Figma Desktop. The MCP client gets structured tools for nodes, pages, local styles and variables, batch changes, and PNG/SVG exports. An optional trusted JavaScript/TypeScript executor provides full access to the pinned file after separate permission in the plugin UI.
 
 ## Requirements
 
@@ -99,11 +99,15 @@ npm test
 MCP client ── stdio ── adapter ── shared local bridge ── WebSocket ── plugin UI ── Figma Plugin API
 ```
 
-Each client starts its own stdio adapter; the shared bridge listens only on `127.0.0.1:55263` and serves one paired plugin connection. The first client to call a tool owns the document until it disconnects; others receive `SESSION_BUSY`. The pairing secret is stored locally, and the plugin remembers it in `figma.clientStorage`.
+Each client starts its own stdio adapter; the shared bridge listens only on `127.0.0.1:55263` and serves one paired plugin connection. Document commands use a shared bounded FIFO queue; idle clients do not block others. Status and cancellation bypass the queue for the submitting client. An uncertain write blocks new commands with `RECOVERY_REQUIRED` until completion is confirmed or the plugin is restarted. The pairing secret is stored locally, and the plugin remembers it in `figma.clientStorage`.
 
 Reading is available after pairing. Writes are enabled in the plugin UI for the pinned document and run in sequential batches with preconditions and result verification. Stop cancels subsequent steps and the queue; changes already applied are not rolled back. When you switch Figma windows, the plugin keeps working with the file where it was started. To use another file, disconnect the previous plugin and connect the new one. PNG/SVG exports pass through size-limited messages and temporary MCP resources.
 
 Document requests and exports are sent to your MCP client and its selected model provider. Start writes with a copy of the document. For operation and size limits, see [contracts](shared/contracts.md), the [limits profile](docs/limits.md), and [batch execution](shared/execution.md). Source code is in `plugin/`, `server/`, and `shared/`; checks are in `tests/`.
+
+## Trusted execution
+
+`figma_execute` runs an async JavaScript/TypeScript function with JSON arguments and cooperative cancellation. It is not a sandbox: code can modify the entire pinned document, and a timeout does not prove cancellation. Server and plugin must be updated together to protocol v2. See the [execution contract](docs/execution.md), [examples](docs/execution-examples.md), and [Desktop verification](openspec/changes/universal-executor/verification.md).
 
 ## License
 

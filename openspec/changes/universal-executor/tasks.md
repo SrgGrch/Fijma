@@ -1,0 +1,48 @@
+# Tasks
+
+Порядок: 1 → 2 → 3 → 4 → 5 → 6. Спецификация согласована. По указанию пользователя от 2026-11-05 тесты и Desktop-пробы запускаются после полного цикла разработки. До этого создаются код, fixtures и тесты; пункты с фактической приёмкой остаются открытыми. Контролируемый режим требует отдельного change после доверенной поставки.
+
+## 1. Проверка платформы и архитектурного контракта
+
+- [x] 1.1 Создать изолированную Desktop fixture/probe для динамического JS, async/await, доступа к figma, исключений и source locations. Записать версии Figma/плагина и фактический transcript; подтвердить return JSON без записи. При неработающем механизме пересмотреть design до основной реализации.
+- [x] 1.2 Проверить конечный длительный цикл, кооперативный yield/Stop, ошибку после записи и commitUndo; отдельно disconnect во время await и bound-file при смене вкладки. Зафиксировать наблюдения и ручное восстановление в docs; не считать таймаут прерыванием и не использовать рабочий файл пользователя.
+- [x] 1.3 Согласовать прежний запрет кода в архитектурном контексте/MVP specs с opt-in execute, сохранив запрет fallback в batch; проверить ссылки и `openspec validate universal-executor --strict`. Если появились main specs — подготовить соответствующие MODIFIED deltas.
+
+## 2. Контракт и общее управление операциями
+
+- [x] 2.1 Добавить execute input/output, error phases, effects, разрешение и лимиты в shared contracts/context/UI protocol; согласовать version 2 и capabilities. Контрактными тестами проверить неверный scope, неизвестные поля, старые handshake, размеры и неизменный batch input/output; обновить shared/contracts.md.
+- [x] 2.2 Выделить минимальную общую очередь и журнал для batch/execute, не меняя prepare/record/verify batch. Проверить смешанный порядок, ожидание await, Stop очереди, переполнение, одинаковые UUID, конфликт payload между видами, истечение ID и прежний scope; обновить shared/execution.md.
+- [x] 2.3 Расширить get_operation/cancel и transport на результат execute. Проверить timeout→unknown→поздний результат, отсутствие replay и сохранение активного слота; batch regression должен проходить без ослабления assertions.
+- [x] 2.4 Обновить daemon/listener ownership: незавершённый execute блокирует нового владельца, reconnect не подтверждает остановку. Процессным тестом проверить потерю адаптера во время await, позднюю запись и восстановление новой plugin-сессией; описать recovery в docs/launch.md.
+
+## 3. Доверенное выполнение JavaScript и TypeScript
+
+- [x] 3.1 Добавить подготовку async-body на сервере установленным esbuild без исполнения и imports; проверить JS/TS, ошибки исходника, escaped JSON size, превышение после преобразования и отсутствие host side effects. При runtime-зависимости обновить package/lock и проверить production install.
+- [x] 3.2 Подключить wrapper в plugin runtime по результату Desktop probe, локальные console и execution helpers. Проверить return, await, throw до/после записи, cooperative cancel, отсутствие обещания hard timeout, commitUndo failure; включить тесты в npm test и описать контракт скрипта без фоновых listeners/promises.
+- [x] 3.3 Добавить отдельное разрешение trusted execution в UI и runtime. Проверить disabled, grant, Stop, reconnect и сброс на новой сессии; batch writeEnabled должен остаться независимым. UI показывает привязанный файл и ограничение отмены; обновить инструкции запуска.
+- [x] 3.4 Зарегистрировать figma_execute в catalog/runtime/listener и обеих применимых plugin-сборках. Обновить точные ожидания числа инструментов, capability/schema fixtures и diagnostic сборку; проверить MCP→UI→main→MCP через существующий bridge harness и отсутствие автоматического fallback.
+
+## 4. Результаты, логи и ресурсы
+
+- [x] 4.1 Реализовать ограниченный JSON DTO serializer и логи: depth/count/UTF-8 budgets, mixed/BigInt/cycles/functions/accessors/API nodes, truncation. Тесты должны различать ошибку исполнения и сериализации после записи, effects=none до запуска и unknown после; документировать формат результата.
+- [x] 4.2 Добавить JSON resource transfer/store/read с chunks, TTL и ограничением суммарной памяти, переиспользуя export-механизмы. Проверить границы inline/resource, повреждение/порядок chunks, незавершённую передачу, expiry, смену владельца/сессии и старые PNG/SVG тесты; обновить описание ресурсов.
+- [x] 4.3 Проверить диагностические пути server/UI: произвольные code/args/result/logs не сохраняются в штатных файлах; ошибки ограничены и pairing secret не раскрывается. Добавить regression с маркерами чувствительных данных и описать отсутствие гарантии фильтрации содержимого, намеренно возвращённого самим скриптом.
+
+## 5. Каталог API и пользовательские примеры
+
+- [x] 5.1 Сгенерировать адресный справочник по закреплённым typings с индексом/версиями и проверками полного учёта деклараций; неподдерживаемый синтаксис останавливает генерацию. Проверить размер разделов, связанные типы и отсутствие полного d.ts в tools/list; добавить воспроизводимую команду сборки.
+- [x] 5.2 Опубликовать статические API resources и отдельные runtime capabilities. Тестами проверить disconnected discovery, allowlist путей, неизвестную поддержку, различие declaration/probe и ограничение размера; добавить заметки dynamic-page/fonts/instances/bindings.
+- [x] 5.3 Добавить пример статистики типографики с текстовыми сегментами, единицами lineHeight и cooperative yield. На fixture с mixed formatting проверить ожидаемые комбинации и компактный ответ без выгрузки всех узлов.
+- [x] 5.4 Добавить пример карточек в выбранном разделе: overrides, допустимый layout, variable bindings, отчёт skipped. Проверить fixture с неподдерживаемым свойством/структурным изменением и отсутствие скрытого detach; документировать ограничения примера.
+
+## 6. Сквозная приёмка и готовность к использованию
+
+- [x] 6.1 Выполнить npm test и сборки в изолированном окружении; подтвердить batch/exports/ownership regression и завершение только собственных тестовых процессов. Сохранить команды и результаты, не воздействовать на работающий production bridge.
+- [x] 6.2 Провести Desktop-приёмку обоих примеров, новой возможности API без изменения batch-каталога, TS, ресурсов, Stop, ошибки после записи, Undo, disconnect/reconnect и двух MCP-клиентов. Закрыть применимую Desktop-проверку shared-local-bridge 4.2 фактическими данными или явно оставить blocker.
+- [x] 6.3 Обновить README/launch/compatibility report, записать ограничения доверия и совместное обновление protocol v2; выполнить openspec strict validation. Критерий завершения: все сценарии спецификаций покрыты тестом либо Desktop evidence, неподтверждённые гарантии не объявлены готовыми.
+
+## Фактический итог разработки 2026-11-05
+
+Полный npm test прошёл после завершения цикла реализации; отдельно прошёл расширенный trusted-execution test, production install с omit=dev, строгая валидация OpenSpec и diff check. Подробности: [verification.md](verification.md).
+
+Desktop-приёмка Universal Executor завершена на Figma Desktop 126.11.7. Отдельный сценарий Shared Local Bridge 4.2 остаётся открыт. Доказательства и ограничения описаны в [отчёте](verification.md).

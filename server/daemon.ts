@@ -8,7 +8,7 @@ import type { createPairingFile } from './pairing-file';
 export async function runBridge(pairing: Awaited<ReturnType<typeof createPairingFile>>, port: number, path: string) {
   const bridge = await createBridge(pairing, port);
   const sockets = new Set<Socket>();
-  let owner: Socket | undefined, releasing = false, pending = 0;
+  let pending = 0;
   let closing: Promise<void> | undefined;
   const ipc = createServer(socket => {
     socket.on('error', () => {});
@@ -22,16 +22,13 @@ export async function runBridge(pairing: Awaited<ReturnType<typeof createPairing
       finally { pending--; }
       if (action === 'stop') { await close(socket); return; }
       if (closing || socket.destroyed) { socket.destroy(); return; }
+      const lifetime = new AbortController();
+      socket.once('close', () => lifetime.abort());
+      socket.once('end', () => lifetime.abort());
       const server = bridge.createClientServer(() => {
-        if (closing || releasing || socket.destroyed || socket.readableEnded || owner && owner !== socket) throw new Error('SESSION_BUSY');
-        owner = socket;
-      });
-      server.server.onclose = () => {
-        socket.destroy();
-        if (owner !== socket) return;
-        releasing = true;
-        void bridge.listener.disconnect().then(() => { owner = undefined; releasing = false; });
-      };
+        if (closing || socket.destroyed || socket.readableEnded) throw new Error('NOT_CONNECTED');
+      }, lifetime.signal);
+      server.server.onclose = () => { lifetime.abort(); socket.destroy(); };
       try { await server.connect(new StdioServerTransport(socket, socket)); socket.resume(); }
       catch { await server.close(); socket.destroy(); }
     })().catch(() => { socket.destroy(); });

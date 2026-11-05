@@ -6,12 +6,16 @@ import { toolInputs } from '../shared/contracts';
 import { contextSchema, disconnectedContext } from '../shared/context';
 import { treeOutputSchema, searchOutputSchema } from '../shared/tree-result';
 import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema, operationOutputSchema, exportOutputSchema, inlinePngTransferSchema } from '../shared/operation-result';
+import { executionOutputSchema, anyOperationOutputSchema } from '../shared/execution-contracts';
+import { registerApiCatalog } from './api-catalog';
+import { CompilationError } from './execution-compiler';
 
 const outputSchemas = {
   figma_get_context: contextSchema, figma_get_tree: treeOutputSchema, figma_find_nodes: searchOutputSchema,
   figma_get_nodes: nodesOutputSchema, figma_get_local_resources: resourcesOutputSchema, figma_navigate: navigateOutputSchema,
-  figma_apply_batch: operationOutputSchema, figma_get_operation: operationOutputSchema, figma_cancel_operation: operationOutputSchema,
+  figma_apply_batch: operationOutputSchema, figma_get_operation: anyOperationOutputSchema, figma_cancel_operation: anyOperationOutputSchema,
   figma_export_node: exportOutputSchema,
+  figma_execute: executionOutputSchema,
 } satisfies Record<keyof typeof toolInputs, z.ZodType>;
 
 const descriptions: Record<keyof typeof toolInputs, string> = {
@@ -25,13 +29,14 @@ const descriptions: Record<keyof typeof toolInputs, string> = {
   figma_get_operation: 'Чтение известного состояния операции без повторного исполнения.',
   figma_cancel_operation: 'Запрос остановки операции без отката применённых изменений.',
   figma_export_node: 'Экспорт выбранного узла в PNG или SVG.',
+  figma_execute: 'Выполнение доверенного JavaScript или TypeScript с полным доступом к API Figma. Отмена кооперативна; await всей работы обязателен.',
 };
 
 export function createServer(getContext: () => Promise<unknown> = async () => disconnectedContext, getTree?: (args: unknown) => Promise<unknown>, findNodes?: (args: unknown) => Promise<unknown>,
   getNodes?: (args: unknown) => Promise<unknown>, getLocalResources?: (args: unknown) => Promise<unknown>, navigate?: (args: unknown) => Promise<unknown>,
   exportNode?: (args: unknown) => Promise<unknown>, readResource?: (uri: string) => { uri: string; mimeType: string; data: Buffer },
   applyBatch?: (args: unknown) => Promise<unknown>, getOperation?: (args: unknown) => Promise<unknown>, cancelOperation?: (args: unknown) => Promise<unknown>, beforeRequest?: () => void,
-  pairingPath = join(homedir(), '.figma-mcp-bridge', 'pairing-secret.txt')) {
+  pairingPath = join(homedir(), '.figma-mcp-bridge', 'pairing-secret.txt'), execute?: (args: unknown) => Promise<unknown>) {
   const copyCommand = `Get-Content -Raw -LiteralPath '${pairingPath.replaceAll("'", "''")}' | Set-Clipboard`;
   const server = new McpServer({ name: 'Fijma', version: '0.1.0' }, {
     instructions: [
@@ -41,17 +46,29 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
       `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
       'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Fijma, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',
       'Сам не читай ключ, не копируй его автоматически и не проси прислать его в чат. Не раскрывай содержимое pairing-secret.txt в MCP-ответах или сообщениях; показывай только команду для локального копирования.',
-      'SESSION_BUSY означает, что документ занят другим MCP-клиентом. В этом случае предложи закрыть его подключение и повторить запрос; не предлагай повторное сопряжение.',
+      'SESSION_BUSY не требует закрытия другого MCP-клиента. Команды клиентов выполняются по FIFO. QUEUE_TIMEOUT означает, что команда не была отправлена в Figma. RECOVERY_REQUIRED означает незавершённую операцию: проверь её статус; если завершение не подтверждено, закрой и заново запусти плагин. Закрывать подключения других клиентов не нужно.',
+      'figma_execute доступен только после отдельного разрешения доверенного кода в UI (executeEnabled). Код — тело async-функции: return JSON; доступны figma, args, console и execution.yield()/execution.checkCancelled().',
+      'Доверенный код имеет полный доступ к документу, read-only не обеспечивается, Stop кооперативен и не гарантирует прерывания. Ожидайте всю работу через await; не оставляйте listeners, callbacks или detached promises и не заменяйте figma.ui.onmessage и не вызывайте closePlugin.',
+      'OUTCOME_UNKNOWN означает, что выполнение может продолжаться: проверяйте figma_get_operation и документ, не запускайте повторно новую операцию. Справочник закреплённого Figma API: figma-api://index; декларации не гарантируют поддержку в конкретной среде.',
     ].join('\n'),
   });
+  registerApiCatalog(server);
   if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
     { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
       try { beforeRequest?.(); }
-      catch { throw new ProtocolError(-32000, 'SESSION_BUSY: закройте подключение другого MCP-клиента и повторите запрос.'); }
+      catch { throw new ProtocolError(-32000, 'SESSION_BUSY: запрос временно недоступен.'); }
       try {
         const resource = readResource(uri.href);
         return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, blob: resource.data.toString('base64') }] };
       } catch { throw new ProtocolError(-32602, 'RESOURCE_EXPIRED: повторите экспорт.'); }
+    });
+  if (readResource) server.registerResource('figma-execution', new ResourceTemplate('figma-resource://execution/{token}', { list: undefined }),
+    { description: 'JSON результат выполнения для текущей сессии.' }, async uri => {
+      try { beforeRequest?.(); } catch { throw new ProtocolError(-32000, 'SESSION_BUSY'); }
+      try {
+        const resource = readResource(uri.href);
+        return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.data.toString('utf8') }] };
+      } catch { throw new ProtocolError(-32602, 'RESOURCE_EXPIRED'); }
     });
   for (const [name, inputSchema] of Object.entries(toolInputs)) {
     const publishedInput = name === 'figma_apply_batch' ? {
@@ -80,8 +97,9 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
           } else output = exportOutputSchema.parse(result);
         }
         else if (name === 'figma_apply_batch' && applyBatch) output = operationOutputSchema.parse(await applyBatch(args));
-        else if (name === 'figma_get_operation' && getOperation) output = operationOutputSchema.parse(await getOperation(args));
-        else if (name === 'figma_cancel_operation' && cancelOperation) output = operationOutputSchema.parse(await cancelOperation(args));
+        else if (name === 'figma_execute' && execute) output = executionOutputSchema.parse(await execute(args));
+        else if (name === 'figma_get_operation' && getOperation) output = anyOperationOutputSchema.parse(await getOperation(args));
+        else if (name === 'figma_cancel_operation' && cancelOperation) output = anyOperationOutputSchema.parse(await cancelOperation(args));
         else {
           const context = contextSchema.parse(await getContext());
           output = { error: { code: context.state === 'ready' ? 'CAPABILITY_UNAVAILABLE' : 'NOT_CONNECTED',
@@ -89,15 +107,16 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
             recoveryAction: 'Проверьте capabilities текущего контекста.' } };
         }
       } catch (error) {
-        const code = error instanceof Error && ['SESSION_BUSY', 'NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
-        output = { error: { code, message: code === 'RESOURCE_LIMIT' ? 'Превышен лимит запроса или ресурса.' : 'Запрос документа недоступен.',
-          recoveryAction: code === 'SESSION_BUSY' ? 'Закройте подключение другого MCP-клиента и повторите запрос.' : code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
+        const code = error instanceof Error && ['INVALID_ARGUMENT', 'QUEUE_TIMEOUT', 'RECOVERY_REQUIRED', 'OPERATION_NOT_OWNED', 'CANCELLED', 'SESSION_BUSY', 'NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'EXECUTION_DISABLED', 'COMPILATION_FAILED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
+        output = { error: { code, ...(error instanceof CompilationError ? { phase: error.phase, ...(error.line ? { line: error.line } : {}), ...(error.column ? { column: error.column } : {}) } : {}), message: code === 'RESOURCE_LIMIT' ? 'Превышен лимит запроса или ресурса.' : 'Запрос документа недоступен.',
+          recoveryAction: code === 'RECOVERY_REQUIRED' ? 'Проверьте статус своей операции. Если завершение не подтверждено, закройте и заново запустите плагин; перечитайте контекст и документ.' : code === 'QUEUE_TIMEOUT' ? 'Команда не отправлена в Figma; повторите после освобождения очереди.' : code === 'OPERATION_NOT_OWNED' ? 'Используйте operationId операции этого MCP-подключения.' : code === 'CANCELLED' ? 'Ожидающая команда отменена до отправки.' : code === 'OUTCOME_UNKNOWN' ? 'Проверьте состояние операции по operationId; не запускайте её повторно.' : code === 'COMPILATION_FAILED' ? 'Исправьте синтаксис и удалите imports.' : code === 'SESSION_BUSY' ? 'Дождитесь освобождения моста и повторите запрос.' : code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
       if (name === 'figma_export_node' && !('error' in output)) {
         if (imageData) content.push({ type: 'image', mimeType: 'image/png', data: imageData });
         else if ('uri' in output) content.push({ type: 'resource_link', uri: output.uri, name: 'Figma export', mimeType: output.mimeType });
       }
+      if ('resource' in output && output.resource && typeof output.resource === 'object' && 'uri' in output.resource) content.push({ type: 'resource_link', uri: output.resource.uri, name: 'Execution result', mimeType: 'application/json' });
       return { structuredContent: output, content,
         ...('error' in output ? { isError: true } : {}) };
     });

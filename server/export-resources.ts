@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 
-type MimeType = 'image/png' | 'image/svg+xml';
+type MimeType = 'image/png' | 'image/svg+xml' | 'application/json';
 type Limits = { ttl: number; maxEntries: number; maxBytes: number; maxResourceBytes: number };
 type Entry = { bytes: Buffer; mimeType: MimeType; expiresAt: number; timer: ReturnType<typeof setTimeout> };
 const prefix = 'figma-resource://export/';
-const uriPattern = /^figma-resource:\/\/export\/[A-Za-z0-9_-]{43}$/;
+const uriPattern = /^figma-resource:\/\/(?:export|execution)\/[A-Za-z0-9_-]{43}$/;
 const maxDate = 8_640_000_000_000_000;
 
 export class ExportResourceStore {
@@ -33,16 +33,26 @@ export class ExportResourceStore {
 
   close() { this.clear(); this.sessionId = undefined; }
 
-  put(sessionId: string, data: Uint8Array, mimeType: MimeType) {
+  put(sessionId: string, data: Uint8Array, mimeType: 'image/png' | 'image/svg+xml') {
+    if (mimeType !== 'image/png' && mimeType !== 'image/svg+xml') throw new Error('INVALID_ARGUMENT');
+    return this.store(sessionId, data, mimeType, prefix);
+  }
+
+  putExecution(sessionId: string, data: Uint8Array) {
+    if (data.byteLength > 262144) throw new Error('RESOURCE_LIMIT');
+    return this.store(sessionId, data, 'application/json', 'figma-resource://execution/');
+  }
+
+  private store(sessionId: string, data: Uint8Array, mimeType: MimeType, resourcePrefix: string) {
     if (!this.sessionId || sessionId !== this.sessionId) throw new Error('SESSION_EXPIRED');
-    if (!(data instanceof Uint8Array) || data.byteLength < 1 || (mimeType !== 'image/png' && mimeType !== 'image/svg+xml')) throw new Error('INVALID_ARGUMENT');
+    if (!(data instanceof Uint8Array) || data.byteLength < 1 || (mimeType !== 'image/png' && mimeType !== 'image/svg+xml' && mimeType !== 'application/json')) throw new Error('INVALID_ARGUMENT');
     const now = this.time();
     this.sweep(now);
     if (data.byteLength > this.limits.maxResourceBytes || this.entries.size >= this.limits.maxEntries ||
       data.byteLength > this.limits.maxBytes - this.totalBytes) throw new Error('RESOURCE_LIMIT');
     if (now + this.limits.ttl > maxDate) throw new Error('INVALID_ARGUMENT');
     let uri: string;
-    do { uri = prefix + randomBytes(32).toString('base64url'); } while (this.entries.has(uri));
+    do { uri = resourcePrefix + randomBytes(32).toString('base64url'); } while (this.entries.has(uri));
     const bytes = Buffer.from(data), expiresAt = now + this.limits.ttl;
     const timer = setTimeout(() => this.remove(uri), this.limits.ttl);
     timer.unref();

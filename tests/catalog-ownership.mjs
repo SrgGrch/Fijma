@@ -11,7 +11,7 @@ const server = createServer(forbidden, forbidden, forbidden, forbidden, forbidde
 const client = new Client({ name: 'ownership-test', version: '1' });
 try {
   await server.connect(a); await client.connect(b);
-  assert.equal((await client.listTools()).tools.length, 10);
+  assert.equal((await client.listTools()).tools.length, 11);
   await client.listResourceTemplates(); await client.ping();
   const scope = { sessionId: 's', connectionGeneration: 1 }, operationId = '019a4a10-0000-7000-8000-000000000001';
   for (const [name, args] of [
@@ -25,7 +25,7 @@ try {
   ]) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true, name); assert.equal(result.structuredContent?.error.code, 'SESSION_BUSY', name);
-    assert.match(result.structuredContent.error.recoveryAction, /другого MCP-клиента/);
+    assert.match(result.structuredContent.error.recoveryAction, /освобождения моста/);
   }
   await assert.rejects(client.readResource({ uri: 'figma-resource://export/' + 'x'.repeat(43) }), /SESSION_BUSY/);
   assert.equal(calls, 0);

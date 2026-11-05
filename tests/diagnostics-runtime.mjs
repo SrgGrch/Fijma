@@ -40,7 +40,7 @@ for (const enabled of [false, true]) {
     socket.on('open', () => socket.send(JSON.stringify({ type: 'pair', secret })));
     socket.on('message', raw => {
       const message = JSON.parse(raw);
-      if (message.type === 'paired') socket.send(JSON.stringify({ type: 'hello', protocolVersion: 1, sessionId: 'trusted-session', capabilities: ['getContext', 'getNodes', 'exportNode', 'applyBatch'], limits: bootstrapLimits, writeEnabled: false }));
+      if (message.type === 'paired') socket.send(JSON.stringify({ type: 'hello', protocolVersion: 2, sessionId: 'trusted-session', capabilities: ['getContext', 'getNodes', 'exportNode', 'applyBatch'], limits: bootstrapLimits, writeEnabled: false }));
       else if (message.type === 'welcome') ready(message);
       else if (message.type === 'getContext') socket.send(JSON.stringify({ type: 'context', requestId: message.requestId, sessionId: message.sessionId, connectionGeneration: message.connectionGeneration, document: { documentLabel: text, pages: [{ id: '0:1', name: text }], currentPageId: '0:1', selection: [] } }));
       else if (message.type === 'command' && message.command === 'applyBatch') socket.send(JSON.stringify({ type: 'operationResult', sessionId: message.sessionId, connectionGeneration: message.connectionGeneration, requestId: message.requestId, operationId: message.operationId, data: { sessionId: message.sessionId, connectionGeneration: message.connectionGeneration, operationId: message.operationId, status: 'succeeded', steps: [], affectedNodeIds: ['1:1'], affectedResourceIds: [], warnings: [secret] } }));

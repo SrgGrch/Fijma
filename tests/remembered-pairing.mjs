@@ -99,7 +99,7 @@ function uiFixture() {
   const fromMain = (message, source) => ui.onmessage({ source, data: { pluginMessage: message } });
   const bind = (socket = sockets.at(-1), generation = 1, source) => {
     socket.onopen(); socket.onmessage({ data: JSON.stringify({ type: 'paired' }) });
-    const hello = { type: 'hello', protocolVersion: 1, sessionId: 's', capabilities: ['getContext', 'applyBatch'], limits: bootstrapLimits, writeEnabled: false };
+    const hello = { type: 'hello', protocolVersion: 2, sessionId: 's', capabilities: ['getContext', 'applyBatch'], limits: bootstrapLimits, writeEnabled: false };
     fromMain(hello, source);
     socket.onmessage({ data: JSON.stringify({ ...hello, type: 'welcome', connectionGeneration: generation }) });
     fromMain({ type: 'bound', sessionId: 's', connectionGeneration: generation, documentLabel: '<Untrusted>', writeEnabled: false, message: 'Ready' }, source);

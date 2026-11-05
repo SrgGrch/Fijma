@@ -6,7 +6,7 @@ const client = new Client({ name: 'bridge-smoke-test', version: '0.1.0' });
 try {
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ['dist/server/index.js'], env: { ...process.env, FIGMA_MCP_PORT: '0' }, stderr: 'pipe' }));
   const result = await client.listTools();
-  assert.equal(result.tools.length, 10);
+  assert.equal(result.tools.length, 11);
   for (const tool of result.tools) {
     assert.ok(tool.inputSchema);
     assert.ok(tool.outputSchema);
@@ -23,7 +23,7 @@ try {
   assert.equal(invalid.isError, true);
   await assert.rejects(client.callTool({ name: 'execute_js', arguments: {} }));
   assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.state, 'disconnected');
-  console.log('MCP stdio: 10 инструментов, схемы, disconnected, tool/protocol errors и повторный вызов — OK');
+  console.log('MCP stdio: 11 инструментов, схемы, disconnected, tool/protocol errors и повторный вызов — OK');
 } finally {
   await client.close();
 }

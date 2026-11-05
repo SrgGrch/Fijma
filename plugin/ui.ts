@@ -5,6 +5,7 @@ const element = (id: string) => document.getElementById(id)!;
 const secret = element('secret') as HTMLInputElement;
 const connect = element('connect') as HTMLButtonElement;
 const disconnect = element('disconnect') as HTMLButtonElement;
+const execute = element('execute') as HTMLInputElement;
 const write = element('write') as HTMLInputElement;
 const stop = element('stop') as HTMLButtonElement;
 const forget = element('forget') as HTMLButtonElement;
@@ -70,7 +71,7 @@ const controller = createBridgeController({
     disconnect.disabled = !connected;
     disconnect.hidden = !connected;
     resume.hidden = connected || !credential;
-    write.disabled = true; stop.disabled = true;
+    write.disabled = true; execute.disabled = true; stop.disabled = true;
     element('workspace').hidden = true;
     if (connected) state('connecting', 'Подключаемся…', 'Проверяем ключ и связываемся с документом.');
   },
@@ -81,16 +82,20 @@ const controller = createBridgeController({
   },
   setWriteState: (enabled, reason) => {
     write.checked = enabled;
-    element('write-status').textContent = enabled ? 'Запись включена' : reason === 'CAPABILITY_UNAVAILABLE' ? 'Запись недоступна' : 'Только чтение';
-    element('write-help').textContent = enabled ? 'Агент может изменять весь этот документ.' : 'Агент может читать и экспортировать документ.';
+    element('write-status').textContent = enabled ? 'Запись включена' : reason === 'CAPABILITY_UNAVAILABLE' ? 'Запись недоступна' : 'Строгая запись выключена';
+    element('write-help').textContent = enabled ? 'Агент может изменять весь этот документ.' : 'Пакетные изменения выключены. Доверенный код имеет отдельное разрешение.';
   },
-  allowedCommands: ['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel'],
+  setExecuteState: (enabled, reason) => {
+    execute.checked = enabled;
+    element('execute-status').textContent = enabled ? 'Доверенный код разрешён' : reason === 'CAPABILITY_UNAVAILABLE' ? 'Выполнение недоступно' : 'Доверенный код выключен';
+  },
+  allowedCommands: ['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel', 'execute'],
   writeEnabled: false,
   onReady: () => {
     ready = true; attempt = 0;
     state('ready', 'Мост подключён', 'Агент работает с этим файлом, даже когда окно скрыто.');
     showError('');
-    write.disabled = false; stop.disabled = false;
+    write.disabled = false; execute.disabled = false; stop.disabled = false;
     element('workspace').hidden = false;
     if (!saved) savePairing();
     pairingView();
@@ -123,6 +128,7 @@ forget.onclick = () => {
   state('offline', 'Сопряжение удаляется', 'Подождите, пока сохранённый ключ будет удалён.');
 };
 window.addEventListener('pagehide', () => { automatic = false; cancelRetry(); controller.disconnect(); });
+execute.onchange = () => { if (ready) controller.setExecuteEnabled(execute.checked); };
 write.onchange = () => { if (ready) controller.setWriteEnabled(write.checked); };
 stop.onclick = () => { if (ready) controller.stop(); };
 onmessage = event => {

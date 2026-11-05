@@ -39,7 +39,7 @@ try {
   limits.maxMessageBytes = 65536;
   limits.operationTimeout = 5000;
   const welcome = once(active, 'message');
-  active.send(JSON.stringify({ type: 'hello', protocolVersion: 1, sessionId: 'first', capabilities: ['getContext', 'getTree'], limits, writeEnabled: false }));
+  active.send(JSON.stringify({ type: 'hello', protocolVersion: 2, sessionId: 'first', capabilities: ['getContext', 'getTree'], limits, writeEnabled: false }));
   const firstGeneration = JSON.parse((await welcome)[0].toString()).connectionGeneration;
   assert.ok(Number.isSafeInteger(firstGeneration) && firstGeneration > 0);
   assert.equal(listener.getBinding().sessionId, 'first');
@@ -71,7 +71,7 @@ try {
   const restored = await connect();
   const pairAgain = once(restored, 'message'); restored.send(JSON.stringify({ type: 'pair', secret: file.secret })); await pairAgain;
   const secondWelcome = once(restored, 'message');
-  restored.send(JSON.stringify({ type: 'hello', protocolVersion: 1, sessionId: 'first', capabilities: [], limits, writeEnabled: false }));
+  restored.send(JSON.stringify({ type: 'hello', protocolVersion: 2, sessionId: 'first', capabilities: [], limits, writeEnabled: false }));
   assert.equal(JSON.parse((await secondWelcome)[0].toString()).connectionGeneration, firstGeneration + 1);
   const pending = [];
   for (let i = 0; i < 4; i++) pending.push(await connect());

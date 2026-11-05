@@ -27,7 +27,7 @@ try {
   const forwarded = new Map();
   const bound = new Promise(resolve => resolveBound = resolve);
   const figma = { root: { name: 'Test document', children: [page] }, currentPage: page, mixed: Symbol('mixed'),
-    getNodeByIdAsync: async id => nodes.get(id) ?? null, async loadFontAsync() { throw new Error('missing'); }, createPage() { const node = { id: 'new:' + ++count, name: '', type: 'PAGE', async loadAsync() {} }; nodes.set(node.id, node); return node; }, commitUndo() {},
+    getNodeByIdAsync: async id => nodes.get(id) ?? null, async loadFontAsync() { throw new Error('missing'); }, createPage() { const node = { id: 'new:' + ++count, name: '', type: 'PAGE', async loadAsync() {} }; nodes.set(node.id, node); return node; }, commitUndo() {}, base64Encode: bytes => Buffer.from(bytes).toString('base64'),
     showUI() {}, ui: {
     postMessage(message) { if (message.type === 'yield' && holdYield) { heldYield = message; return; } queueMicrotask(() => {
       ui.onmessage({ data: { pluginMessage: message } });
@@ -113,6 +113,36 @@ try {
   assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: ackArgs })).structuredContent.status, 'succeeded');
   assert.equal(count, 2); assert.equal(ackCount, 1);
   holdYield = false;
+
+  const executeId = operationId.replace(/1$/, 'a');
+  const executeArgs = { scope, operationId: executeId, language: 'typescript', code: 'const amount: number = args.amount; await Promise.resolve(); figma.createPage(); return { amount };', args: { amount: 7 } };
+  const denied = (await client.callTool({ name: 'figma_execute', arguments: executeArgs })).structuredContent;
+  assert.equal(denied.error.code, 'EXECUTION_DISABLED'); assert.equal(count, 2);
+  elements.execute.checked = true; elements.execute.onchange();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.executeEnabled, true);
+  const executed = (await client.callTool({ name: 'figma_execute', arguments: executeArgs })).structuredContent;
+  assert.equal(executed.kind, 'execute'); assert.equal(executed.status, 'succeeded', JSON.stringify(executed));
+  assert.equal(executed.effects, 'unknown'); assert.deepEqual(executed.value, { amount: 7 }); assert.equal(count, 3);
+  const repeated = (await client.callTool({ name: 'figma_execute', arguments: executeArgs })).structuredContent;
+  assert.equal(repeated.status, 'succeeded'); assert.deepEqual(repeated.value, { amount: 7 }); assert.equal(count, 3);
+  const executeStatus = (await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: executeId } })).structuredContent;
+  assert.equal(executeStatus.kind, 'execute'); assert.equal(executeStatus.status, 'succeeded'); assert.deepEqual(executeStatus.value, { amount: 7 });
+
+  const errorId = operationId.replace(/1$/, 'b');
+  const failedExecution = (await client.callTool({ name: 'figma_execute', arguments: { scope, operationId: errorId, language: 'javascript', code: "figma.root.name = 'Changed'; throw new Error('fixture failure');" } })).structuredContent;
+  assert.equal(failedExecution.status, 'failed'); assert.equal(failedExecution.effects, 'unknown');
+  assert.equal(failedExecution.error.phase, 'execute'); assert.match(failedExecution.error.message, /fixture failure/); assert.equal(figma.root.name, 'Changed');
+
+  const resourceId = operationId.replace(/1$/, 'c');
+  const resourceResult = (await client.callTool({ name: 'figma_execute', arguments: { scope, operationId: resourceId, language: 'javascript', code: "return { text: 'z'.repeat(40000) };" } })).structuredContent;
+  assert.equal(resourceResult.status, 'succeeded', JSON.stringify(resourceResult)); assert.equal(resourceResult.resource.mimeType, 'application/json');
+  const resource = await client.readResource({ uri: resourceResult.resource.uri });
+  assert.equal(JSON.parse(resource.contents[0].text).text, 'z'.repeat(40000));
+  const resourceStatus = (await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: resourceId } })).structuredContent;
+  assert.equal(resourceStatus.status, 'succeeded');
+  assert.equal(JSON.parse((await client.readResource({ uri: resourceStatus.resource.uri })).contents[0].text).text, 'z'.repeat(40000));
+
   elements.stop.onclick();
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.writeEnabled, false);

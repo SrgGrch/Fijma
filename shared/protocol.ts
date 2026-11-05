@@ -15,7 +15,7 @@ export function utf8Bytes(value: string) {
 }
 export const jsonMessageBytes = (value: unknown) => utf8Bytes(JSON.stringify(value));
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 const id = z.string().min(1);
 const positive = z.number().int().positive();
 export const limitsSchema = z.strictObject({
@@ -32,7 +32,7 @@ export const welcomeSchema = z.strictObject({ type: z.literal('welcome'), protoc
 const commandTools = {
   getTree: 'figma_get_tree', findNodes: 'figma_find_nodes', getNodes: 'figma_get_nodes',
   getLocalResources: 'figma_get_local_resources', navigate: 'figma_navigate', applyBatch: 'figma_apply_batch',
-  getOperation: 'figma_get_operation', cancel: 'figma_cancel_operation', exportNode: 'figma_export_node',
+  getOperation: 'figma_get_operation', cancel: 'figma_cancel_operation', exportNode: 'figma_export_node', execute: 'figma_execute',
 } as const;
 const commandSchema = z.strictObject({ type: z.literal('command'), ...scopeSchema.shape,
   operationId: operationIdSchema, requestId: z.string().uuid().optional(), command: z.enum(Object.keys(commandTools) as [string, ...string[]]), params: z.record(z.string(), z.json()) });
@@ -44,7 +44,7 @@ export function negotiateHello(raw: unknown, generation: number, diagnostic = fa
   if (diagnostic && (!hello.writeEnabled || !hello.capabilities.includes('applyBatch'))) throw new Error('PROTOCOL_MISMATCH');
   const limits = Object.fromEntries(Object.entries(hello.limits).map(([key, value]) => [key, Math.min(value, bootstrapLimits[key as keyof typeof bootstrapLimits])]));
   return welcomeSchema.parse({ ...hello, type: 'welcome', connectionGeneration: generation, limits, writeEnabled: diagnostic,
-    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel'].includes(value)) });
+    capabilities: hello.capabilities.filter(value => ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel', 'execute'].includes(value)) });
 }
 
 export function validateCommand(raw: unknown, scope: z.infer<typeof scopeSchema>) {
@@ -53,11 +53,16 @@ export function validateCommand(raw: unknown, scope: z.infer<typeof scopeSchema>
   if (command.connectionGeneration !== scope.connectionGeneration) throw new Error('SESSION_EXPIRED');
   const tool = commandTools[command.command as keyof typeof commandTools];
   const input = { scope, ...command.params,
-    ...(['applyBatch', 'getOperation', 'cancel'].includes(command.command) ? { operationId: command.operationId } : {}),
+    ...(['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command) ? { operationId: command.operationId } : {}),
   };
   // Params cannot override envelope identity; all identity fields live in the envelope.
   if ('scope' in command.params || 'operationId' in command.params) throw new Error('INVALID_ARGUMENT');
-  toolInputs[tool].parse(input);
+  if (command.command === 'execute') {
+    const { compiledCode, ...source } = input as typeof input & { compiledCode?: unknown };
+    if (typeof compiledCode !== 'string' || !compiledCode.length || utf8Bytes(compiledCode) > bootstrapLimits.maxMessageBytes) throw new Error('INVALID_ARGUMENT');
+    toolInputs.figma_execute.parse(source);
+    if (utf8Bytes(source.code as string) > 32768 || utf8Bytes(JSON.stringify(source.args ?? null)) > 8192) throw new Error('RESOURCE_LIMIT');
+  } else toolInputs[tool].parse(input);
   return command;
 }
 

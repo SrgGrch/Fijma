@@ -76,7 +76,7 @@ Read-схемы отделены от write: они сохраняют нуле�
 
 Пример: `{operationId:"019a4a10-0000-7000-8000-000000000001",sessionId:"s",connectionGeneration:1,status:"partially_applied",steps:[{stepId:"one",status:"failed",outputs:{},appliedChanges:{nodeIds:["1:1"],resourceIds:[]},error:{code:"FIGMA_API_ERROR",message:"failed",recoveryAction:"Read changes"}}],affectedNodeIds:["1:1"],affectedResourceIds:[],warnings:[]}`.
 
-Коды ошибок: NOT_CONNECTED, AUTH_FAILED, SESSION_BUSY, PROTOCOL_MISMATCH, SESSION_EXPIRED, DOCUMENT_MISMATCH, INVALID_ARGUMENT, INVALID_CURSOR, NODE_NOT_FOUND, CAPABILITY_UNAVAILABLE, FONT_UNAVAILABLE, CONFLICT, OPERATION_ID_CONFLICT, OPERATION_EXPIRED, RESOURCE_LIMIT, RESOURCE_EXPIRED, WRITE_DISABLED, FIGMA_API_ERROR, OUTCOME_UNKNOWN. При CONFLICT нужно перечитать объект, при OUTCOME_UNKNOWN — выяснить статус и перечитать документ без слепого повтора.
+Коды ошибок: NOT_CONNECTED, AUTH_FAILED, SESSION_BUSY, QUEUE_TIMEOUT, RECOVERY_REQUIRED, OPERATION_NOT_OWNED, PROTOCOL_MISMATCH, SESSION_EXPIRED, DOCUMENT_MISMATCH, INVALID_ARGUMENT, INVALID_CURSOR, NODE_NOT_FOUND, CAPABILITY_UNAVAILABLE, FONT_UNAVAILABLE, CONFLICT, OPERATION_ID_CONFLICT, OPERATION_EXPIRED, RESOURCE_LIMIT, RESOURCE_EXPIRED, WRITE_DISABLED, FIGMA_API_ERROR, OUTCOME_UNKNOWN. При CONFLICT нужно перечитать объект, при OUTCOME_UNKNOWN — выяснить статус и перечитать документ без слепого повтора.
 
 Если имена недоступных шрифтов удалось определить, FONT_UNAVAILABLE содержит `details.fonts` — массив `{family,style}`. Когда Figma сообщает о недостающем шрифте без определяемого имени, ошибка может прийти без списка. Исходный текст исключения API не передаётся.
 
@@ -85,3 +85,15 @@ Read-схемы отделены от write: они сохраняют нуле�
 Схемы описывают целевой контракт, а не доступность всех функций. Сейчас подключены context, tree и find; обработчики остальных инструментов и проверка предусловий в Figma ещё реализуются. Запись отключена до проверки границы документа в задаче 1.2. Фактические возможности сообщает context. Каталог публикует схемы результатов всех инструментов; проекции чтения и их обработчики уточняются в задаче 4.3.
 
 При `moveNode` индекс считается после исключения перемещаемого узла из списка детей; его локальная матрица сохраняется и потому координаты трактуются относительно нового родителя. Для `movePage` индекс задаёт итоговую позицию страницы. `groupNodes` принимает узлы с одной страницей с указанным родителем; Figma сохраняет их абсолютное положение. `ungroupNode` использует нативную семантику Figma и может изменить выделение, если группа выделена. Автокомпоновка может изменить фактическую геометрию: перечитайте узлы после операции. Перед записью отклоняются циклы, неподходящие родители и изменения внутри instance; операция не выполняет detach. Ограничения циклов компонентов проверяет Figma. Результат включает известные изменённые узлы, родителей и предков, созданную группу или удалённую группу и её детей; Figma может автоматически удалить опустевшие группы.
+
+## Доверенное выполнение (protocol v2)
+
+`figma_execute` принимает scope, UUIDv7 operationId, language (`javascript`/`typescript`), code (тело async-функции) и необязательные JSON args. Сервер добавляет compiledCode только во внутреннее сообщение; публичная схема его отклоняет. `readOnly` не поддерживается. Для execute требуется отдельное разрешение UI; batch writeEnabled не разрешает скрипты.
+
+Результат имеет kind=execute, effects=none только до запуска, иначе unknown, ограниченные logs/logsTruncated, value либо resource. Статус succeeded не подтверждает отсутствие побочных эффектов. get_operation/cancel принимают оба вида; форма batch-результата сохраняется. При таймауте нельзя повторно запускать исходник с новым ID без проверки документа. API-каталог и ограничения среды публикуются отдельно от tools/list.
+
+### Несколько MCP-клиентов
+
+Команды документа сериализуются общей FIFO-очередью; владения на время соединения нет. Лимиты ожидания и размера очереди — `operationTimeout` и `maxQueuedOperations`. `QUEUE_TIMEOUT` означает отсутствие отправки в Figma; `RESOURCE_LIMIT` — переполнение. Отключение удаляет ожидающие команды клиента, не отменяя автоматически уже отправленные и не разрывая подключение плагина. Статус/отмена доступны только отправителю (`OPERATION_NOT_OWNED` для чужих или неизвестных operationId), включая ожидающие команды. Экспортные ресурсы доступны только создавшему их клиенту.
+
+`OUTCOME_UNKNOWN` не освобождает доступ для новых команд, пока выполнение не подтверждено: они получают `RECOVERY_REQUIRED`. Поздний терминальный ответ или терминальный статус снимает барьер. Если связь оборвалась с незавершённой записью, новая сессия plugin main обязательна. Клиент должен сам получить контекст перед записью. Между отдельными командами нет транзакционной изоляции: batch использует прежние предусловия, execute должен самостоятельно учитывать изменения документа.

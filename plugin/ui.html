@@ -60,15 +60,15 @@ label.field-label { display: block; font-weight: 600; margin-bottom: 7px; }
 .access-title { font-weight: 600; }
 .access-title small { color: var(--muted); font-size: 10px; font-weight: 400; display: block; margin-top: 2px; }
 .toggle { position: relative; display: block; width: 34px; height: 20px; flex: none; cursor: pointer; }
-#write { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 1; }
+#write, #execute { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 1; }
 .toggle-track { display: block; width: 34px; height: 20px; border-radius: 20px; background: #777982; }
 .toggle-track::after { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .12s; }
-#write:checked + .toggle-track { background: var(--accent); }
-#write:checked + .toggle-track::after { transform: translateX(14px); }
-#write:focus-visible + .toggle-track { outline: 2px solid var(--accent); outline-offset: 3px; }
-#write:disabled + .toggle-track { opacity: .45; }
+#write:checked + .toggle-track, #execute:checked + .toggle-track { background: var(--accent); }
+#write:checked + .toggle-track::after, #execute:checked + .toggle-track::after { transform: translateX(14px); }
+#write:focus-visible + .toggle-track, #execute:focus-visible + .toggle-track { outline: 2px solid var(--accent); outline-offset: 3px; }
+#write:disabled + .toggle-track, #execute:disabled + .toggle-track { opacity: .45; }
 #write-status { margin: 13px 0 2px; font-size: 12px; font-weight: 600; }
-#write-help { margin: 0; color: var(--muted); font-size: 11px; }
+#write-help, #execute-help { margin: 0; color: var(--muted); font-size: 11px; }
 #stop { margin-top: 17px; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; color: var(--danger); }
 .stop-symbol { width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
 .activity { border-top: 1px solid var(--line); margin-top: 19px; padding-top: 14px; }
@@ -113,7 +113,13 @@ footer { padding: 17px 22px 19px; }
         <label class="access-title" for="write">Разрешить изменения<small>Весь документ · Full-document / YOLO</small></label>
         <span class="toggle"><input id="write" type="checkbox" disabled role="switch" aria-describedby="write-help"><span class="toggle-track" aria-hidden="true"></span></span>
       </div>
-      <p id="write-status">Только чтение</p><p id="write-help">Агент может читать и экспортировать документ.</p>
+      <p id="write-status">Строгая запись выключена</p><p id="write-help">Пакетные изменения выключены. Доверенный код имеет отдельное разрешение.</p>
+      <div class="access-top" style="margin-top:16px">
+        <label class="access-title" for="execute">Разрешить доверенный код<small>Чтение и изменение всего привязанного файла</small></label>
+        <span class="toggle"><input id="execute" type="checkbox" disabled role="switch" aria-describedby="execute-help"><span class="toggle-track" aria-hidden="true"></span></span>
+      </div>
+      <p id="execute-status">Доверенный код выключен</p>
+      <p id="execute-help">Скрипт может изменять документ. Остановка действует только когда код отдаёт управление; зависший код требует перезапуска плагина.</p>
       <button id="stop" disabled><span class="stop-symbol" aria-hidden="true"></span>Остановить очередь</button>
     </section>
     <section id="activity" class="activity" data-active="false" aria-label="Активность">
