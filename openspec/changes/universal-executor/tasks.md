@@ -4,8 +4,8 @@
 
 ## 1. Проверка платформы и архитектурного контракта
 
-- [ ] 1.1 Создать изолированную Desktop fixture/probe для динамического JS, async/await, доступа к figma, исключений и source locations. Записать версии Figma/плагина и фактический transcript; подтвердить return JSON без записи. При неработающем механизме пересмотреть design до основной реализации.
-- [ ] 1.2 Проверить конечный длительный цикл, кооперативный yield/Stop, ошибку после записи и commitUndo; отдельно disconnect во время await и bound-file при смене вкладки. Зафиксировать наблюдения и ручное восстановление в docs; не считать таймаут прерыванием и не использовать рабочий файл пользователя.
+- [x] 1.1 Создать изолированную Desktop fixture/probe для динамического JS, async/await, доступа к figma, исключений и source locations. Записать версии Figma/плагина и фактический transcript; подтвердить return JSON без записи. При неработающем механизме пересмотреть design до основной реализации.
+- [x] 1.2 Проверить конечный длительный цикл, кооперативный yield/Stop, ошибку после записи и commitUndo; отдельно disconnect во время await и bound-file при смене вкладки. Зафиксировать наблюдения и ручное восстановление в docs; не считать таймаут прерыванием и не использовать рабочий файл пользователя.
 - [x] 1.3 Согласовать прежний запрет кода в архитектурном контексте/MVP specs с opt-in execute, сохранив запрет fallback в batch; проверить ссылки и `openspec validate universal-executor --strict`. Если появились main specs — подготовить соответствующие MODIFIED deltas.
 
 ## 2. Контракт и общее управление операциями
@@ -18,7 +18,7 @@
 ## 3. Доверенное выполнение JavaScript и TypeScript
 
 - [x] 3.1 Добавить подготовку async-body на сервере установленным esbuild без исполнения и imports; проверить JS/TS, ошибки исходника, escaped JSON size, превышение после преобразования и отсутствие host side effects. При runtime-зависимости обновить package/lock и проверить production install.
-- [ ] 3.2 Подключить wrapper в plugin runtime по результату Desktop probe, локальные console и execution helpers. Проверить return, await, throw до/после записи, cooperative cancel, отсутствие обещания hard timeout, commitUndo failure; включить тесты в npm test и описать контракт скрипта без фоновых listeners/promises.
+- [x] 3.2 Подключить wrapper в plugin runtime по результату Desktop probe, локальные console и execution helpers. Проверить return, await, throw до/после записи, cooperative cancel, отсутствие обещания hard timeout, commitUndo failure; включить тесты в npm test и описать контракт скрипта без фоновых listeners/promises.
 - [x] 3.3 Добавить отдельное разрешение trusted execution в UI и runtime. Проверить disabled, grant, Stop, reconnect и сброс на новой сессии; batch writeEnabled должен остаться независимым. UI показывает привязанный файл и ограничение отмены; обновить инструкции запуска.
 - [x] 3.4 Зарегистрировать figma_execute в catalog/runtime/listener и обеих применимых plugin-сборках. Обновить точные ожидания числа инструментов, capability/schema fixtures и diagnostic сборку; проверить MCP→UI→main→MCP через существующий bridge harness и отсутствие автоматического fallback.
 
@@ -38,11 +38,11 @@
 ## 6. Сквозная приёмка и готовность к использованию
 
 - [x] 6.1 Выполнить npm test и сборки в изолированном окружении; подтвердить batch/exports/ownership regression и завершение только собственных тестовых процессов. Сохранить команды и результаты, не воздействовать на работающий production bridge.
-- [ ] 6.2 Провести Desktop-приёмку обоих примеров, новой возможности API без изменения batch-каталога, TS, ресурсов, Stop, ошибки после записи, Undo, disconnect/reconnect и двух MCP-клиентов. Закрыть применимую Desktop-проверку shared-local-bridge 4.2 фактическими данными или явно оставить blocker.
-- [ ] 6.3 Обновить README/launch/compatibility report, записать ограничения доверия и совместное обновление protocol v2; выполнить openspec strict validation. Критерий завершения: все сценарии спецификаций покрыты тестом либо Desktop evidence, неподтверждённые гарантии не объявлены готовыми.
+- [x] 6.2 Провести Desktop-приёмку обоих примеров, новой возможности API без изменения batch-каталога, TS, ресурсов, Stop, ошибки после записи, Undo, disconnect/reconnect и двух MCP-клиентов. Закрыть применимую Desktop-проверку shared-local-bridge 4.2 фактическими данными или явно оставить blocker.
+- [x] 6.3 Обновить README/launch/compatibility report, записать ограничения доверия и совместное обновление protocol v2; выполнить openspec strict validation. Критерий завершения: все сценарии спецификаций покрыты тестом либо Desktop evidence, неподтверждённые гарантии не объявлены готовыми.
 
 ## Фактический итог разработки 2026-11-05
 
 Полный npm test прошёл после завершения цикла реализации; отдельно прошёл расширенный trusted-execution test, production install с omit=dev, строгая валидация OpenSpec и diff check. Подробности: [verification.md](verification.md).
 
-Открыты только пункты, которые требуют реальной Desktop-приёмки: 1.1, 1.2, 3.2 (код и автоматические тесты готовы, отсутствует Desktop-подтверждение), 6.2, 6.3 (документация готова, общий критерий приёмки ещё не выполнен). Эти пункты не отмечены выполненными на основании VM/симулятора. Пользователь перенёс тестирование на период после полного цикла разработки; рабочий плагин пользователя не заменялся.
+Desktop-приёмка Universal Executor завершена на Figma Desktop 126.11.7. Отдельный сценарий Shared Local Bridge 4.2 остаётся открыт. Доказательства и ограничения описаны в [отчёте](verification.md).

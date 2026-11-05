@@ -155,7 +155,7 @@ export async function createPairingListener(secret: string, port: number, diagno
                 if (reply.sessionId !== binding.sessionId || reply.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
                 const operation = operations.get(reply.requestId ?? '');
                 if (!operation) {
-                  if ('operationId' in reply.data && 'kind' in reply.data && reply.data.kind === 'execute' && !['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
+                  if ('operationId' in reply.data && !['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
                   return;
                 }
                 if (operation.id !== reply.operationId) throw new Error('PROTOCOL_MISMATCH');
@@ -163,8 +163,8 @@ export async function createPairingListener(secret: string, port: number, diagno
                 operations.delete(reply.requestId!); clearTimeout(operation.timer);
                 const timing = { operationId: reply.operationId, durationMs: performance.now() - operation.started };
                 if ('operationId' in reply.data) {
+                  if (!['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
                   if ('kind' in reply.data && reply.data.kind === 'execute') {
-                    if (!['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
                     const error = reply.data.error;
                     operation.resolve({ ...reply.data, ...(error ? { error: safeExecutionError(error, secret) } : {}), ...(operation.resource ? { executionResourceData: operation.resource } : {}) });
                     return;
@@ -174,7 +174,7 @@ export async function createPairingListener(secret: string, port: number, diagno
                     steps: reply.data.steps.map(step => ({ ...step, ...(step.error ? { error: safeError(step.error) } : {}) })) };
                   operation.resolve(data);
                 } else {
-                  if (operation.action === 'execute' && reply.data.error.code !== 'OPERATION_ID_CONFLICT' && ![...operations.values()].some(item => item.action === 'execute' && item.id === operation.id)) unfinished.delete(operation.id);
+                  if ((operation.action === 'execute' || operation.action === 'applyBatch') && reply.data.error.code !== 'OPERATION_ID_CONFLICT' && ![...operations.values()].some(item => (item.action === 'execute' || item.action === 'applyBatch') && item.id === operation.id)) unfinished.delete(operation.id);
                   if (operation.action !== 'execute') journal?.failed(operation.action, timing, reply.data.error.code);
                   operation.resolve({ error: safeError(reply.data.error) });
                 }
@@ -238,6 +238,8 @@ export async function createPairingListener(secret: string, port: number, diagno
     server.once('error', reject);
   });
   return { address: server.address(), getBinding: () => binding, hasOrphanedExecution: () => Boolean(orphanedSession),
+    isUnfinished: (id: string) => unfinished.has(id),
+    needsRecovery: () => Boolean(orphanedSession || unfinished.size || drainingActive()),
     async disconnect() {
       const socket = active;
       if (!socket) return;
@@ -292,7 +294,7 @@ export async function createPairingListener(secret: string, port: number, diagno
       const timer = setTimeout(() => { operations.delete(requestId); if (command !== 'execute') journal?.failed(command, { operationId: id, durationMs: performance.now() - started }, 'OUTCOME_UNKNOWN'); reject(new Error('OUTCOME_UNKNOWN')); }, binding!.limits.operationTimeout);
       operations.set(requestId, { id, action: command, resolve, reject, timer, started });
     });
-    if (command === 'execute') unfinished.add(id);
+    if (command === 'execute' || command === 'applyBatch') unfinished.add(id);
     active.send(wire);
     return promise;
   }

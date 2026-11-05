@@ -64,7 +64,7 @@ try {
   const [a, b] = await Promise.all([start(), start()]);
   console.log('Shared bridge: concurrent adapters connected');
   assert.equal((await call(a, 'figma_get_context')).structuredContent.state, 'disconnected');
-  assert.equal((await call(b, 'figma_get_context')).structuredContent.error.code, 'SESSION_BUSY');
+  assert.equal((await call(b, 'figma_get_context')).structuredContent.state, 'disconnected');
   const keyPath = join(directory, 'pairing-secret.txt'), token = await readFile(keyPath, 'utf8');
   assert.ok(!a.diagnostics.includes(token) && !b.diagnostics.includes(token));
 
@@ -91,15 +91,15 @@ try {
   elements.secret.value = token; elements.connect.onclick();
   const context = await ready(a), scope = { sessionId: context.sessionId, connectionGeneration: context.connectionGeneration };
   await b.client.close(); await delay(30);
-  assert.equal((await ready(a)).connectionGeneration, scope.connectionGeneration, 'non-owner close must preserve plugin');
+  assert.equal((await ready(a)).connectionGeneration, scope.connectionGeneration, 'client close must preserve plugin');
   assert.equal(sockets.length, 1);
   const c = await start();
-  console.log('Shared bridge: plugin ready; non-owner disconnect preserved binding');
-  assert.equal((await call(c, 'figma_get_context')).structuredContent.error.code, 'SESSION_BUSY');
+  console.log('Shared bridge: plugin ready; client disconnect preserved binding');
+  assert.equal((await call(c, 'figma_get_context')).structuredContent.state, 'ready');
   const exported = (await call(a, 'figma_export_node', { scope, nodeId: node.id, format: 'SVG' })).structuredContent;
   assert.ok(exported.uri, JSON.stringify(exported));
   assert.deepEqual(Buffer.from((await a.client.readResource({ uri: exported.uri })).contents[0].blob, 'base64'), output);
-  await assert.rejects(c.client.readResource({ uri: exported.uri }), /SESSION_BUSY/);
+  await assert.rejects(c.client.readResource({ uri: exported.uri }), /RESOURCE_EXPIRED/);
 
   // Pending unauthenticated pipes cannot displace authenticated MCP sessions.
   const unauthenticated = [];
@@ -130,19 +130,19 @@ try {
   assert.equal((await call(a, 'figma_get_operation', { scope, operationId: pendingId })).structuredContent.status, 'running');
   assert.equal((await call(a, 'figma_get_operation', { scope, operationId: queuedId })).structuredContent.status, 'queued');
   process.kill(a.transport.pid, 'SIGKILL'); await Promise.all([pending, queued]);
-  console.log('Shared bridge: owner killed during batch');
+  console.log('Shared bridge: sender killed during batch');
+  holding = false; ui.onmessage({ data: { pluginMessage: heldYield } });
   const next = await ready(c), nextScope = { sessionId: next.sessionId, connectionGeneration: next.connectionGeneration };
-  assert.notEqual(next.connectionGeneration, scope.connectionGeneration); assert.equal(next.writeEnabled, false);
-  holding = false; ui.onmessage({ data: { pluginMessage: heldYield } }); await delay(50);
-  assert.equal(count, 2, 'in-flight and queued background writes must stop on owner loss without replay');
-  assert.equal((await call(c, 'figma_get_tree', { scope, rootId: page.id, depth: 1, limit: 10 })).structuredContent.error.code, 'SESSION_EXPIRED');
+  assert.equal(next.connectionGeneration, scope.connectionGeneration); assert.equal(next.writeEnabled, true);
+  assert.equal(count, 3, 'active batch finishes; disconnected client queued batch must never run');
+  assert.equal(sockets.length, 1, 'client disconnect must not reconnect the plugin');
   await assert.rejects(c.client.readResource({ uri: exported.uri }), /RESOURCE_EXPIRED/);
   const tree = await call(c, 'figma_get_tree', { scope: nextScope, rootId: page.id, depth: 1, limit: 10 });
   assert.ok(!tree.isError, JSON.stringify(tree));
   await c.client.close();
   const d = await start(); await ready(d); await d.client.close();
-  console.log('Shared bridge: ownership handed over after crash and EOF');
-  const e = await start(); assert.equal((await ready(e)).writeEnabled, false);
+  console.log('Shared bridge: other clients continue after crash and EOF');
+  const e = await start(); assert.equal((await ready(e)).writeEnabled, true);
   assert.equal((await readFile(keyPath, 'utf8')), token);
 
   const stopped = await run(['--stop-bridge']); assert.equal(stopped.code, 0, stopped.stderr); assert.equal(stopped.stdout, '');
@@ -153,7 +153,7 @@ try {
   const restarted = await start(); await ready(restarted); assert.equal(await readFile(keyPath, 'utf8'), token);
   process.kill(daemonPid, 'SIGKILL'); await delay(50); daemonPid = undefined;
   console.log('Shared bridge: daemon crash');
-  const afterCrash = await start(); await ready(afterCrash); assert.equal(count, 2);
+  const afterCrash = await start(); await ready(afterCrash); assert.equal(count, 3);
   await afterCrash.client.close();
   assert.equal((await run(['--stop-bridge'])).code, 0); daemonPid = undefined;
 
@@ -178,7 +178,7 @@ try {
   for (const [args, override] of [[['--unknown'], {}], [['--bridge', '--stop-bridge'], {}], [['--bridge'], { FIGMA_MCP_PORT: '0' }], [[], { FIGMA_MCP_PORT: '-1' }]]) {
     const result = await run(args, override); assert.equal(result.code, 1); assert.equal(result.stdout, '');
   }
-  console.log('Shared bridge processes + plugin runtime: concurrent startup, ownership, export isolation, crash/EOF handover, no write replay, persistence, stop/restart and occupied port OK');
+  console.log('Shared bridge processes + plugin runtime: concurrent startup, FIFO scheduling, export isolation, crash/EOF cleanup, no write replay, persistence, stop/restart and occupied port OK');
 } catch (error) { console.error(error); throw error; }
 finally {
   console.log('Shared bridge: cleaning up test processes');

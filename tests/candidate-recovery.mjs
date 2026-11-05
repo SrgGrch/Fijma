@@ -75,6 +75,8 @@ try {
   assert.equal(lostResult.error.code, 'OUTCOME_UNKNOWN');
   dropId = undefined;
   await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.error.code, 'RECOVERY_REQUIRED');
+  runInNewContext(main, { figma, __html__: '' });
   elements.secret.value = token; elements.connect.onclick();
   let fresh;
   for (let i = 0; i < 100; i++) {
@@ -84,16 +86,14 @@ try {
   }
   assert.equal(fresh.state, 'ready'); assert.equal(fresh.writeEnabled, false);
   const newScope = { sessionId: fresh.sessionId, connectionGeneration: fresh.connectionGeneration };
-  assert.equal(newScope.sessionId, scope.sessionId); assert.notEqual(newScope.connectionGeneration, scope.connectionGeneration);
+  assert.notEqual(newScope.sessionId, scope.sessionId); assert.notEqual(newScope.connectionGeneration, scope.connectionGeneration);
   const known = (await client.callTool({ name: 'figma_get_operation', arguments: { scope: newScope, operationId: lostId } })).structuredContent;
-  assert.equal(known.status, 'succeeded', JSON.stringify(known)); assert.equal(known.connectionGeneration, scope.connectionGeneration);
+  assert.equal(known.error.code, 'OPERATION_NOT_OWNED');
   assert.equal(count, 2);
   const stale = (await client.callTool({ name: 'figma_apply_batch', arguments: { ...args, operationId: lostId } })).structuredContent;
   assert.equal(stale.error.code, 'SESSION_EXPIRED');
   elements.write.checked = true; elements.write.onchange();
   await new Promise(resolve => setTimeout(resolve, 50));
-  const changed = (await client.callTool({ name: 'figma_apply_batch', arguments: { ...args, scope: newScope, operationId: lostId, steps: [{ stepId: 'new', op: 'createPage', name: 'Changed' }] } })).structuredContent;
-  assert.equal(changed.error.code, 'OPERATION_ID_CONFLICT'); assert.equal(count, 2);
   const second = new WebSocket(url); sockets.push(second);
   await new Promise((resolve, reject) => { second.once('open', () => second.send(JSON.stringify({ type: 'pair', secret: token }))); second.once('close', (code, reason) => { try { assert.equal(code, 1008); assert.equal(reason.toString(), 'SESSION_BUSY'); resolve(); } catch (e) { reject(e); } }); second.once('error', reject); });
   const timeoutId = operationId.replace(/1$/, '5'); dropId = timeoutId;
@@ -114,7 +114,7 @@ try {
   assert.equal(restarted.state, 'ready'); assert.notEqual(restarted.sessionId, scope.sessionId); assert.equal(restarted.writeEnabled, false);
   const restartedScope = { sessionId: restarted.sessionId, connectionGeneration: restarted.connectionGeneration };
   const unknown = (await client.callTool({ name: 'figma_get_operation', arguments: { scope: restartedScope, operationId: timeoutId } })).structuredContent;
-  assert.equal(unknown.status, 'unknown');
+  assert.equal(unknown.error.code, 'OPERATION_NOT_OWNED');
   const expired = (await client.callTool({ name: 'figma_get_operation', arguments: { scope: newScope, operationId: timeoutId } })).structuredContent;
   assert.equal(expired.error.code, 'SESSION_EXPIRED'); assert.equal(count, 3);
   console.log('Candidate fakeFigma SDK recovery: disconnect, reconnect, conflict and timeout OK');

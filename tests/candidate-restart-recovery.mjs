@@ -72,11 +72,9 @@ try {
   assert.ok(scope.connectionGeneration < oldScope.connectionGeneration);
   assert.equal(second.writeEnabled, false);
   const known = (await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId } })).structuredContent;
-  assert.equal(known.status, 'succeeded', JSON.stringify(known));
-  assert.equal(known.connectionGeneration, oldScope.connectionGeneration);
+  assert.equal(known.error.code, 'OPERATION_NOT_OWNED', 'new bridge has no previous client ownership');
   const cancelled = (await client.callTool({ name: 'figma_cancel_operation', arguments: { scope, operationId } })).structuredContent;
-  assert.equal(cancelled.status, 'succeeded');
-  assert.equal(cancelled.connectionGeneration, oldScope.connectionGeneration);
+  assert.equal(cancelled.error.code, 'OPERATION_NOT_OWNED');
   assert.equal((await client.callTool({ name: 'figma_apply_batch', arguments: args })).structuredContent.error.code, 'SESSION_EXPIRED');
   elements.write.checked = true; elements.write.onchange();
   for (let i = 0; i < 100; i++) { if ((await ready()).writeEnabled) break; await new Promise(resolve => setTimeout(resolve, 10)); }

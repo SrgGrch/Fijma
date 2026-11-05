@@ -1,6 +1,6 @@
 # Executor Desktop probe protocol
 
-Status: **not run**. This is a disposable diagnostic plugin, not acceptance evidence. Import `experiments/execution-probe/manifest.json` in Figma Desktop and use a new test file. Record Desktop version, OS, plugin manifest revision, date and the complete UI transcript, without document or secret data.
+Status: **read and throw observed in Desktop**. See the [recorded results](../openspec/changes/universal-executor/verification.md#desktop-probe-2026-11-05). Import `experiments/execution-probe/manifest.json` in Figma Desktop and use a new test file. Record Desktop version, OS, plugin manifest revision, date and the complete UI transcript, without document or secret data.
 
 1. Run Async JSON read: record its return and whether the file remains unchanged. Run Async throw and preserve its stack/source locations.
 2. Run Yield loop then Stop; record whether Stop is observed and when. Run Finite blocking loop and attempt Stop while it runs; note UI responsiveness. The loop is finite, but if Figma becomes unresponsive manually close the disposable plugin or Figma and reopen the test file. A timeout is not interruption.

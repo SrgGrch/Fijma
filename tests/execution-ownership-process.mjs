@@ -62,10 +62,11 @@ try {
   const pending = call(owner, 'figma_execute', { scope, operationId, language: 'javascript', code: 'await wait; figma.lateWrite();' }).catch(() => {});
   await bounded(commandReceived, 'execute command');
   await bounded(owner.close(), 'owner close'); await bounded(pending, 'pending request close'); await delay(100);
-  assert.equal((await call(other, 'figma_get_context')).structuredContent.error.code, 'SESSION_BUSY');
+  first.socket.terminate(); await delay(50);
+  assert.equal((await call(other, 'figma_get_context')).structuredContent.error.code, 'RECOVERY_REQUIRED');
   resume(); await simulatedExecution; assert.equal(lateWrite, 1);
   const same = await pair(secret, 'execution-session-a'); assert.equal(same.reason, 'SESSION_BUSY');
-  assert.equal((await call(other, 'figma_get_context')).structuredContent.error.code, 'SESSION_BUSY');
+  assert.equal((await call(other, 'figma_get_context')).structuredContent.error.code, 'RECOVERY_REQUIRED');
   const replacement = await pair(secret, 'execution-session-b'); assert.ok(replacement.welcome);
   contextReply(replacement.socket, 'execution-session-b', replacement.welcome.connectionGeneration);
   const recovered = (await call(other, 'figma_get_context')).structuredContent;

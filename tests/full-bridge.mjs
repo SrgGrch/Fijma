@@ -96,7 +96,7 @@ try {
   const stale = await client.callTool({ name: 'figma_get_tree', arguments: { scope: { ...scope, sessionId: 'old' }, rootId: '0:1', depth: 1, limit: 10 } });
   assert.equal(stale.structuredContent.error.code, 'SESSION_EXPIRED');
   const unknown = await client.callTool({ name: 'figma_get_operation', arguments: { scope, operationId: '019a4a10-0000-7000-8000-000000000001' } });
-  assert.equal(unknown.structuredContent.status, 'unknown');
+  assert.equal(unknown.structuredContent.error.code, 'OPERATION_NOT_OWNED');
   const stamp = Date.now().toString(16).padStart(12, '0');
   const writeId = `${stamp.slice(0,8)}-${stamp.slice(8)}-7000-8000-000000000001`;
   const writeArgs = { scope, operationId: writeId, steps: [{ stepId: 'page', op: 'createPage', name: 'Production write' }] };

@@ -25,7 +25,7 @@ try {
   ]) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true, name); assert.equal(result.structuredContent?.error.code, 'SESSION_BUSY', name);
-    assert.match(result.structuredContent.error.recoveryAction, /другого MCP-клиента/);
+    assert.match(result.structuredContent.error.recoveryAction, /освобождения моста/);
   }
   await assert.rejects(client.readResource({ uri: 'figma-resource://export/' + 'x'.repeat(43) }), /SESSION_BUSY/);
   assert.equal(calls, 0);

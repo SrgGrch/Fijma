@@ -46,7 +46,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
       `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
       'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Figma MCP Bridge, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',
       'Сам не читай ключ, не копируй его автоматически и не проси прислать его в чат. Не раскрывай содержимое pairing-secret.txt в MCP-ответах или сообщениях; показывай только команду для локального копирования.',
-      'SESSION_BUSY означает, что документ занят другим MCP-клиентом. В этом случае предложи закрыть его подключение и повторить запрос; не предлагай повторное сопряжение.',
+      'SESSION_BUSY не требует закрытия другого MCP-клиента. Команды клиентов выполняются по FIFO. QUEUE_TIMEOUT означает, что команда не была отправлена в Figma. RECOVERY_REQUIRED означает незавершённую операцию: проверь её статус; если завершение не подтверждено, закрой и заново запусти плагин. Закрывать подключения других клиентов не нужно.',
       'figma_execute доступен только после отдельного разрешения доверенного кода в UI (executeEnabled). Код — тело async-функции: return JSON; доступны figma, args, console и execution.yield()/execution.checkCancelled().',
       'Доверенный код имеет полный доступ к документу, read-only не обеспечивается, Stop кооперативен и не гарантирует прерывания. Ожидайте всю работу через await; не оставляйте listeners, callbacks или detached promises и не заменяйте figma.ui.onmessage и не вызывайте closePlugin.',
       'OUTCOME_UNKNOWN означает, что выполнение может продолжаться: проверяйте figma_get_operation и документ, не запускайте повторно новую операцию. Справочник закреплённого Figma API: figma-api://index; декларации не гарантируют поддержку в конкретной среде.',
@@ -56,7 +56,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
   if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
     { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
       try { beforeRequest?.(); }
-      catch { throw new ProtocolError(-32000, 'SESSION_BUSY: закройте подключение другого MCP-клиента и повторите запрос.'); }
+      catch { throw new ProtocolError(-32000, 'SESSION_BUSY: запрос временно недоступен.'); }
       try {
         const resource = readResource(uri.href);
         return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, blob: resource.data.toString('base64') }] };
@@ -107,9 +107,9 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
             recoveryAction: 'Проверьте capabilities текущего контекста.' } };
         }
       } catch (error) {
-        const code = error instanceof Error && ['SESSION_BUSY', 'NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'EXECUTION_DISABLED', 'COMPILATION_FAILED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
+        const code = error instanceof Error && ['INVALID_ARGUMENT', 'QUEUE_TIMEOUT', 'RECOVERY_REQUIRED', 'OPERATION_NOT_OWNED', 'CANCELLED', 'SESSION_BUSY', 'NOT_CONNECTED', 'SESSION_EXPIRED', 'CAPABILITY_UNAVAILABLE', 'RESOURCE_LIMIT', 'WRITE_DISABLED', 'EXECUTION_DISABLED', 'COMPILATION_FAILED', 'OPERATION_ID_CONFLICT', 'OPERATION_EXPIRED', 'OUTCOME_UNKNOWN'].includes(error.message) ? error.message : 'FIGMA_API_ERROR';
         output = { error: { code, ...(error instanceof CompilationError ? { phase: error.phase, ...(error.line ? { line: error.line } : {}), ...(error.column ? { column: error.column } : {}) } : {}), message: code === 'RESOURCE_LIMIT' ? 'Превышен лимит запроса или ресурса.' : 'Запрос документа недоступен.',
-          recoveryAction: code === 'OUTCOME_UNKNOWN' ? 'Проверьте состояние операции по operationId; не запускайте её повторно.' : code === 'COMPILATION_FAILED' ? 'Исправьте синтаксис и удалите imports.' : code === 'SESSION_BUSY' ? 'Закройте подключение другого MCP-клиента и повторите запрос.' : code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
+          recoveryAction: code === 'RECOVERY_REQUIRED' ? 'Проверьте статус своей операции. Если завершение не подтверждено, закройте и заново запустите плагин; перечитайте контекст и документ.' : code === 'QUEUE_TIMEOUT' ? 'Команда не отправлена в Figma; повторите после освобождения очереди.' : code === 'OPERATION_NOT_OWNED' ? 'Используйте operationId операции этого MCP-подключения.' : code === 'CANCELLED' ? 'Ожидающая команда отменена до отправки.' : code === 'OUTCOME_UNKNOWN' ? 'Проверьте состояние операции по operationId; не запускайте её повторно.' : code === 'COMPILATION_FAILED' ? 'Исправьте синтаксис и удалите imports.' : code === 'SESSION_BUSY' ? 'Дождитесь освобождения моста и повторите запрос.' : code === 'RESOURCE_LIMIT' ? 'Уменьшите объём запроса, пакета или экспорта и повторите.' : 'Переподключите плагин и повторите чтение контекста.' } };
       }
       const content: any[] = [{ type: 'text', text: JSON.stringify(output) }];
       if (name === 'figma_export_node' && !('error' in output)) {

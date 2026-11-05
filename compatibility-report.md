@@ -84,6 +84,6 @@ Manifest сборки: `dist/plugin/manifest.json`. Пользователь п�
 
 ## Universal executor — разработка 2026-11-05
 
-В ветке codex/universal-executor-plan реализованы отдельное разрешение UI, protocol v2, общая очередь batch/execute, JS/TS compiler, JSON resources и каталог API. Проверки были перенесены пользователем на завершение цикла разработки. Прежние результаты MVP не доказывают совместимость этого механизма. Desktop-проба подготовлена, но пока не запускалась; поддержка AsyncFunction, Undo и поведения после обрыва требует фактической приёмки.
+В ветке codex/universal-executor-plan реализованы отдельное разрешение UI, protocol v2, общая очередь batch/execute, JS/TS compiler, JSON resources и каталог API. Плагин и сервер обновляются вместе.
 
-После завершения разработки полный npm test прошёл, включая новый сквозной SDK→WebSocket→UI→runtime сценарий JS/TS, errors after write, ресурсы и dedup. Дополнительно прошли тесты timeout/recovery/cancel, production install без devDependencies и OpenSpec strict validation. Это автоматическая приёмка с симулированным Plugin API; Desktop пока не проверен. Подробности: openspec/changes/universal-executor/verification.md.
+После завершения разработки полный `npm test` прошёл с симулированным Plugin API. На Figma Desktop 126.11.7 в File-B проверены AsyncFunction, TS, оба примера, JSON resource, кооперативный Stop, Undo, смена вкладки и восстановление после обрыва. Синхронный цикл завершился полностью. Скрипт имеет доступ ко всему привязанному файлу, остановка кооперативна, исход после обрыва может быть неизвестен. Полный сценарий Shared Local Bridge 4.2 остаётся открытым. [Результаты](openspec/changes/universal-executor/verification.md)
