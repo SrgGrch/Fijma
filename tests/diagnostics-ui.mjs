@@ -25,7 +25,7 @@ assert.equal(elements.secret.value, '');
 const socket = sockets[0]; socket.onopen();
 const server = value => socket.onmessage({ data: JSON.stringify(value) });
 const fromMain = value => ui.onmessage({ data: { pluginMessage: value } });
-const hello = { type: 'hello', protocolVersion: 1, sessionId: 'new', capabilities: ['getContext', 'getTree', 'applyBatch'], limits: bootstrapLimits, writeEnabled: true };
+const hello = { type: 'hello', protocolVersion: 2, sessionId: 'new', capabilities: ['getContext', 'getTree', 'applyBatch'], limits: bootstrapLimits, writeEnabled: true };
 server({ type: 'paired' }); fromMain(hello);
 server({ ...hello, type: 'welcome', connectionGeneration: 2 });
 fromMain({ type: 'bound', sessionId: 'new', connectionGeneration: 2, documentLabel: 'Fixture', writeEnabled: true, message: 'diagnostic' });

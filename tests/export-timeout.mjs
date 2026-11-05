@@ -13,7 +13,7 @@ try {
     maxResponseBytes: 32768, maxImportBytes: 262144, maxExportPixels: 1000000, maxExportBytes: 262144,
     operationTimeout: 30, dedupTtl: 60000, maxJournalEntries: 100, resourceTtl: 1000, clockSkew: 5000 };
   next = once(socket, 'message');
-  socket.send(JSON.stringify({ type: 'hello', protocolVersion: 1, sessionId: 's', capabilities: ['getTree', 'exportNode'], limits, writeEnabled: false }));
+  socket.send(JSON.stringify({ type: 'hello', protocolVersion: 2, sessionId: 's', capabilities: ['getTree', 'exportNode'], limits, writeEnabled: false }));
   const binding = JSON.parse((await next)[0].toString());
   const scope = { sessionId: 's', connectionGeneration: binding.connectionGeneration };
   next = once(socket, 'message');

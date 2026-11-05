@@ -33,7 +33,7 @@ async function start() {
   const pid = Number(diagnostics.match(/Общий мост: PID (\d+)/)?.[1]); assert.ok(pid);
   if (daemonPid) assert.equal(pid, daemonPid); else daemonPid = pid;
   let discoveryDeadline;
-  try { assert.equal((await Promise.race([client.listTools(), new Promise((_, reject) => { discoveryDeadline = setTimeout(() => reject(Error('Discovery deadline: ' + diagnostics)), 5000); })])).tools.length, 10); }
+  try { assert.equal((await Promise.race([client.listTools(), new Promise((_, reject) => { discoveryDeadline = setTimeout(() => reject(Error('Discovery deadline: ' + diagnostics)), 5000); })])).tools.length, 11); }
   finally { clearTimeout(discoveryDeadline); }
   await client.ping();
   assert.equal(protocolErrors.length, 0, 'stdout must contain only valid MCP');

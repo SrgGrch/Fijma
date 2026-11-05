@@ -12,7 +12,7 @@ const script = uiBuild.outputFiles[0].text;
 const built = await build({ entryPoints: ['shared/bootstrap-limits.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { bootstrapLimits } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
 const operationId = '019a4a10-0000-7000-8000-000000000001';
-const hello = { type: 'hello', protocolVersion: 1, sessionId: 's', capabilities: ['getContext', 'getTree', 'navigate'], limits: bootstrapLimits, writeEnabled: false };
+const hello = { type: 'hello', protocolVersion: 2, sessionId: 's', capabilities: ['getContext', 'getTree', 'navigate'], limits: bootstrapLimits, writeEnabled: false };
 const welcome = { ...hello, type: 'welcome', connectionGeneration: 1 };
 function setup(initiallyHidden = false) {
   const elements = createUIElements();
@@ -39,15 +39,15 @@ function paired() { const h = setup(); h.server({ type: 'paired' }); return h; }
 function awaitingWelcome() { const h = paired(); h.main(hello); return h; }
 function ready() { const h = awaitingWelcome(); h.server(welcome); h.main({ type: 'bound', sessionId: 's', connectionGeneration: 1, documentLabel: 'Test', writeEnabled: false, message: 'Ready' }); return h; }
 
-for (const bad of [{ type: 'paired', extra: true }, { type: 'welcome' }, { type: 'paired', protocolVersion: 1 }]) {
+for (const bad of [{ type: 'paired', extra: true }, { type: 'welcome' }, { type: 'paired', protocolVersion: 2 }]) {
   const h = setup(), before = h.sentMain.length; h.server(bad);
   assert.equal(h.socket.readyState, 3); assert.equal(h.sentMain.length, before + 1); assert.equal(h.sentMain.at(-1).type, 'disconnected');
 }
 {
-  const h = paired(); h.main({ ...hello, protocolVersion: 2 });
+  const h = paired(); h.main({ ...hello, protocolVersion: 999 });
   assert.equal(h.socket.readyState, 3); assert.equal(h.socket.sent.length, 1);
 }
-for (const bad of [{ ...welcome, protocolVersion: 2 }, { ...welcome, sessionId: 'other' }, { ...welcome, extra: 1 }, { ...welcome, writeEnabled: true }]) {
+for (const bad of [{ ...welcome, protocolVersion: 999 }, { ...welcome, sessionId: 'other' }, { ...welcome, extra: 1 }, { ...welcome, writeEnabled: true }]) {
   const h = awaitingWelcome(), before = h.sentMain.length; h.server(bad);
   assert.equal(h.socket.readyState, 3); assert.equal(h.sentMain.length, before + 1); assert.equal(h.sentMain.at(-1).type, 'disconnected');
 }

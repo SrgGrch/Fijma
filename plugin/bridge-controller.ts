@@ -8,6 +8,7 @@ type Options = {
   setConnected: (connected: boolean) => void;
   setDocument: (document: string) => void;
   setOperation?: (operation: string) => void;
+  setExecuteState?: (enabled: boolean, reason?: string) => void;
   setWriteState?: (enabled: boolean, reason?: string) => void;
   onReady?: () => void;
   onDisconnect?: (reason: string) => void;
@@ -26,14 +27,14 @@ export function createBridgeController(options: Options) {
   const pending = new Map<string, { id: string; command: string }>();
   const showOperation = () => {
     const entries = [...pending.values()];
-    const current = entries.find(entry => entry.command === 'applyBatch') ?? entries[0];
+    const current = entries.find(entry => ['applyBatch', 'execute'].includes(entry.command)) ?? entries[0];
     options.setOperation?.(current ? `${current.command} (${current.id})` : '');
   };
   const reset = () => {
     phase = 'pairing'; sessionId = undefined; binding = undefined;
     pending.clear();
     options.sendMain({ type: 'disconnected' });
-    options.setConnected(false); options.setDocument(''); options.setOperation?.(''); options.setWriteState?.(false);
+    options.setConnected(false); options.setDocument(''); options.setOperation?.(''); options.setWriteState?.(false); options.setExecuteState?.(false);
   };
   const sameScope = (message: { sessionId: string; connectionGeneration: number }) =>
     !!binding && message.sessionId === binding.sessionId && message.connectionGeneration === binding.connectionGeneration;
@@ -91,6 +92,7 @@ export function createBridgeController(options: Options) {
       if (current) current.close();
       reset(); options.setStatus('Отключено пользователем.');
     },
+    setExecuteEnabled(enabled: boolean) { options.sendMain({ type: 'setExecuteEnabled', enabled }); },
     setWriteEnabled(enabled: boolean) { options.sendMain({ type: 'setWriteEnabled', enabled }); },
     stop() { options.sendMain({ type: 'stop' }); },
     sendExtension(raw: unknown) {
@@ -107,28 +109,30 @@ export function createBridgeController(options: Options) {
         sessionId = message.sessionId; phase = 'welcome'; socket.send(JSON.stringify(message)); return;
       }
       if (message.type === 'writeState' && phase === 'ready' && binding) { options.setWriteState?.(message.enabled, message.reason); socket.send(JSON.stringify({ ...message, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration })); return; }
+      if (message.type === 'executeState' && phase === 'ready' && binding) { options.setExecuteState?.(message.enabled, message.reason); socket.send(JSON.stringify({ ...message, sessionId: binding.sessionId, connectionGeneration: binding.connectionGeneration })); return; }
       if (message.type === 'error') { fail(socket, message.code, 'main'); return; }
       if (message.type === 'bound' && phase === 'ready' && sameScope(message) && message.writeEnabled === options.writeEnabled) {
         options.setStatus(message.message); options.setDocument(message.documentLabel); options.onReady?.(); return;
       }
-      if (message.type === 'operationResult' && (!options.allowedCommands.includes('applyBatch') || !binding?.capabilities.includes('applyBatch'))) {
+      if (message.type === 'operationResult' && !(options.allowedCommands.includes('applyBatch') && binding?.capabilities.includes('applyBatch') || options.allowedCommands.includes('execute') && binding?.capabilities.includes('execute'))) {
         fail(socket); return;
       }
       if (['exportStart', 'exportChunk', 'exportError'].includes(message.type) && (!options.allowedCommands.includes('exportNode') || !binding?.capabilities.includes('exportNode'))) {
         fail(socket); return;
       }
+      if (['executionStart', 'executionChunk'].includes(message.type) && (!options.allowedCommands.includes('execute') || !binding?.capabilities.includes('execute'))) { fail(socket); return; }
       if (phase === 'ready' && 'sessionId' in message && 'connectionGeneration' in message && sameScope(message)) {
         const result = 'data' in message && typeof message.data === 'object' ? message.data : undefined;
         const error = ('error' in message && message.error) || (result && 'error' in result && result.error) ||
           (result && 'steps' in result && result.steps.find(step => step.error)?.error);
         if (error) (options.setError ?? options.setStatus)(error.code + ': ' + error.message);
-        if ('operationId' in message && message.type !== 'ack' && message.type !== 'exportStart' && (message.type !== 'exportChunk' || message.index === message.total - 1)) {
+        if ('operationId' in message && message.type !== 'ack' && message.type !== 'exportStart' && message.type !== 'executionStart' && message.type !== 'executionChunk' && (message.type !== 'exportChunk' || message.index === message.total - 1)) {
           if (message.type === 'operationResult') {
             const key = message.requestId ?? [...pending].find(([, entry]) => entry.id === message.operationId && ['getOperation', 'cancel'].includes(entry.command))?.[0] ?? `applyBatch:${message.operationId}`;
             const request = pending.get(key);
             const terminal = 'operationId' in message.data && ['succeeded', 'failed', 'partially_applied', 'cancelled'].includes(message.data.status);
-            if (terminal) for (const [pendingKey, entry] of pending) if (entry.id === message.operationId && entry.command === 'applyBatch') pending.delete(pendingKey);
-            if (request && (request.command !== 'applyBatch' || terminal || !('operationId' in message.data))) pending.delete(key);
+            if (terminal) for (const [pendingKey, entry] of pending) if (entry.id === message.operationId && ['applyBatch', 'execute'].includes(entry.command)) pending.delete(pendingKey);
+            if (request && (!['applyBatch', 'execute'].includes(request.command) || terminal || !('operationId' in message.data))) pending.delete(key);
           } else {
             const command = ({ treeResult: 'getTree', searchResult: 'findNodes', nodesResult: 'getNodes', resourcesResult: 'getLocalResources', navigateResult: 'navigate', exportError: 'exportNode', exportChunk: 'exportNode' } as Record<string, string>)[message.type];
             pending.delete(`${command}:${message.operationId}`);

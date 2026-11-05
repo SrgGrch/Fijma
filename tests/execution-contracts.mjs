@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+
+const compiled = await build({ stdin: { contents: `export * from './shared/contracts'; export * from './shared/protocol'; export * from './shared/execution-contracts'; export * from './shared/execution-wire'; export * from './shared/bootstrap-limits';`, resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false });
+const { toolInputs, validateCommand, executionResultSchema, executionStartSchema, negotiateHello, bootstrapLimits } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+const scope = { sessionId: 'test', connectionGeneration: 1 };
+const operationId = '019a4a10-0000-7000-8000-000000000001';
+const source = { language: 'typescript', code: 'const count: number = 1; return count;', args: { limit: 2 } };
+assert.ok(toolInputs.figma_execute.safeParse({ scope, operationId, ...source }).success);
+assert.equal(toolInputs.figma_execute.safeParse({ scope, operationId, ...source, readOnly: true }).success, false);
+assert.equal(toolInputs.figma_execute.safeParse({ scope, operationId, ...source, compiledCode: 'return 1' }).success, false);
+const command = { type: 'command', ...scope, operationId, command: 'execute', params: { ...source, compiledCode: '(async function(){ return 1; })' } };
+assert.equal(validateCommand(command, scope).command, 'execute');
+assert.throws(() => validateCommand({ ...command, params: source }, scope));
+assert.throws(() => validateCommand({ ...command, connectionGeneration: 2 }, scope));
+assert.throws(() => validateCommand({ ...command, params: { ...command.params, args: 'x'.repeat(8193) } }, scope));
+assert.throws(() => negotiateHello({ type: 'hello', protocolVersion: 1, sessionId: 'test', capabilities: [], limits: bootstrapLimits, writeEnabled: false }, 1), /PROTOCOL_MISMATCH/);
+const result = { ...scope, operationId, kind: 'execute', status: 'succeeded', effects: 'unknown', value: { count: 1 }, logs: [], logsTruncated: false, warnings: [] };
+assert.ok(executionResultSchema.safeParse(result).success);
+assert.equal(executionResultSchema.safeParse({ ...result, valueResourcePending: true }).success, false);
+assert.equal(executionResultSchema.safeParse({ ...result, status: 'failed' }).success, false);
+assert.equal(executionStartSchema.safeParse({ type: 'executionStart', ...scope, operationId, requestId: '12345678-1234-4234-8234-123456789012', bytes: 10, total: 1, chunkBytes: 3 }).success, false);
+console.log('Execution contracts: source/wire separation, scope, limits and honest result schema — OK');

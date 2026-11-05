@@ -11,7 +11,7 @@ const server = createServer(forbidden, forbidden, forbidden, forbidden, forbidde
 const client = new Client({ name: 'ownership-test', version: '1' });
 try {
   await server.connect(a); await client.connect(b);
-  assert.equal((await client.listTools()).tools.length, 10);
+  assert.equal((await client.listTools()).tools.length, 11);
   await client.listResourceTemplates(); await client.ping();
   const scope = { sessionId: 's', connectionGeneration: 1 }, operationId = '019a4a10-0000-7000-8000-000000000001';
   for (const [name, args] of [

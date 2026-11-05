@@ -33,7 +33,7 @@ try {
   assert.ok(instructions.includes('SESSION_BUSY'));
   assert.equal(instructions.includes(await readFile(keyPath, 'utf8')), false, 'instructions must never expose the pairing key');
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 10);
+  assert.equal(tools.length, 11);
   assert.ok(Buffer.byteLength(JSON.stringify({ tools })) < 500_000, 'published tools/list remains compact');
   const byName = Object.fromEntries(tools.map(tool => [tool.name, tool]));
   const validate = new CfWorkerJsonSchemaValidator().getValidator(byName.figma_apply_batch.inputSchema);
