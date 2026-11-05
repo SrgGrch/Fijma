@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-const built = await build({ entryPoints: ['plugin/trusted-execution.ts', 'shared/execution-queue.ts', 'shared/operation-journal.ts', 'shared/batch-executor.ts', 'shared/execution-json.ts'], bundle: true, format: 'esm', platform: 'node', outdir: 'out', write: false });
+const built = await build({ entryPoints: ['plugin/trusted-execution.ts', 'shared/execution-queue.ts', 'shared/operation-journal.ts', 'shared/batch-executor.ts', 'shared/execution-json.ts', 'shared/execution-transport.ts'], bundle: true, format: 'esm', platform: 'node', outdir: 'out', write: false });
 const load = async n => import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[n].text).toString('base64')}`);
 const { TrustedExecution } = await load(0), { ExecutionQueue } = await load(1), { OperationJournal } = await load(2), { BatchExecutor } = await load(3), { executionJson } = await load(4);
+const { ExecutionTransport } = await load(5);
 const now = Date.now();
 const id = n => `${now.toString(16).padStart(12, '0').slice(0,8)}-${now.toString(16).padStart(12, '0').slice(8)}-7000-8000-${String(n).padStart(12,'0')}`;
 const scope = { sessionId: 's', connectionGeneration: 1 }, queue = new ExecutionQueue(4);
@@ -41,3 +42,58 @@ assert.throws(() => executionJson(1n), /RESULT_NOT_SERIALIZABLE/);
 assert.throws(() => executionJson(Object.fromEntries(Array.from({ length: 10001 }, (_, i) => [String(i), null]))), /RESULT_NOT_SERIALIZABLE/);
 assert.throws(() => executionJson('a'.repeat(262145)), /RESOURCE_LIMIT/);
 assert.equal(executionJson(undefined).json, 'null');
+
+// A client timeout only stops waiting; the slot and dedup record remain live.
+let unblock, runs = 0, generation = 1;
+const suspended = new Promise(resolve => { unblock = resolve; });
+const queue2 = new ExecutionQueue(4);
+const journal2 = new OperationJournal({ dedupTtl: 60000, clockSkew: 5000, maxJournalEntries: 20 });
+const api2 = { suspended, run() { runs++; } };
+const platform2 = { figma: api2, checkScope(s) { if (s.connectionGeneration !== generation) throw Error('SESSION_EXPIRED'); }, yieldControl: async () => {}, commitUndo() {} };
+const trusted2 = new TrustedExecution(journal2, queue2, platform2, 4, 30000);
+const batch2 = new BatchExecutor(journal2, { checkScope() {}, async prepare() {}, async readExpected() { return {}; }, async execute() { return {}; }, commitUndo() {} }, 4, queue2);
+const transport = new ExecutionTransport(batch2, scope, trusted2);
+const slow = { language: 'javascript', code: 'slow', compiledCode: 'figma.run(); await figma.suspended; return 42;' };
+assert.equal((await transport.submitExecute(scope, id(6), slow, now, 5)).status, 'unknown');
+assert.equal(queue2.hasExecute, true);
+assert.equal((await transport.submitExecute(scope, id(6), slow, now, 100)).status, 'running');
+assert.equal(runs, 1);
+unblock();
+for (let i = 0; i < 20 && transport.executeStatus(id(6)).status !== 'succeeded'; i++) await new Promise(resolve => setImmediate(resolve));
+assert.equal(transport.executeStatus(id(6)).value, 42);
+generation = 2;
+transport.reconnect({ sessionId: scope.sessionId, connectionGeneration: 2 });
+assert.equal((await transport.submitExecute(scope, id(6), slow, now, 100)).value, 42);
+assert.equal((await transport.submitExecute(scope, id(7), slow, now, 100)).status, 'unknown');
+assert.equal(runs, 1);
+
+// Cancellation of active code is confirmed only at a cooperative check.
+let resumeActive;
+api2.suspended = new Promise(resolve => { resumeActive = resolve; });
+const currentScope = { ...scope, connectionGeneration: 2 };
+const cooperative = { language: 'javascript', code: 'cooperative', compiledCode: 'await figma.suspended; execution.checkCancelled(); return 1;' };
+const active = trusted2.submit(currentScope, id(8), cooperative, now);
+for (let i = 0; i < 20 && trusted2.get(id(8)).status !== 'running'; i++) await new Promise(resolve => setImmediate(resolve));
+assert.equal(trusted2.get(id(8)).status, 'running');
+const queued = trusted2.submit(currentScope, id(9), { language: 'javascript', code: 'queued', compiledCode: 'figma.run();' }, now);
+queue2.cancel(id(8)); queue2.cancel(id(9));
+assert.equal(trusted2.get(id(8)).status, 'running');
+resumeActive();
+const activeResult = await active, queuedResult = await queued;
+assert.equal(activeResult.status, 'cancelled'); assert.equal(activeResult.effects, 'unknown');
+assert.equal(queuedResult.status, 'cancelled'); assert.equal(queuedResult.effects, 'none');
+assert.equal(runs, 1);
+
+// An operation whose scope expires while queued fails before its body begins.
+let resumeScope;
+api2.suspended = new Promise(resolve => { resumeScope = resolve; });
+const blocker = trusted2.submit(currentScope, id(10), slow, now);
+for (let i = 0; i < 20 && trusted2.get(id(10)).status !== 'running'; i++) await new Promise(resolve => setImmediate(resolve));
+assert.equal(trusted2.get(id(10)).status, 'running');
+const stale = trusted2.submit(currentScope, id(11), { language: 'javascript', code: 'stale', compiledCode: 'figma.run();' }, now);
+generation = 3;
+resumeScope(); await blocker;
+const staleResult = await stale;
+assert.equal(staleResult.status, 'failed'); assert.equal(staleResult.effects, 'none');
+assert.equal(staleResult.error.code, 'SESSION_EXPIRED'); assert.equal(staleResult.error.phase, 'prepare');
+assert.equal(runs, 2);

@@ -5,5 +5,8 @@
 <script>
 const output = document.getElementById('output');
 document.querySelectorAll('button').forEach(button => button.onclick = () => parent.postMessage({ pluginMessage: button.dataset.probe }, '*'));
-window.onmessage = event => { output.textContent += JSON.stringify(event.data.pluginMessage) + '\n'; };
+window.onmessage = event => {
+  const message = event.data.pluginMessage;
+  if (message?.event === 'yield') { setTimeout(() => parent.postMessage({ pluginMessage: { type: 'yield', id: message.id } }, '*'), message.ms); return; }
+  output.textContent += JSON.stringify(event.data.pluginMessage) + '\n'; };
 </script>

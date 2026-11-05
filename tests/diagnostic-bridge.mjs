@@ -68,7 +68,7 @@ try {
   assert.equal(mainMessages.pop().type, 'bound');
   for (const stale of [{ sessionId: 'old', connectionGeneration: 2 }, { sessionId: hello.sessionId, connectionGeneration: 1 }]) {
     await rawMain.ui.onmessage({ type: 'command', ...stale, operationId: '019a4a10-0000-7000-8000-000000000001', command: 'applyBatch', params: { steps: [markerStep('0:1')] } });
-    assert.equal(mainMessages.pop().code, 'INVALID_ARGUMENT');
+    assert.equal(mainMessages.pop().code, 'SESSION_EXPIRED');
   }
   assert.equal(writes, 0);
   rawMain.root = { ...rawMain.root, children: [...rawMain.root.children] };

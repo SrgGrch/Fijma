@@ -85,3 +85,5 @@ Manifest сборки: `dist/plugin/manifest.json`. Пользователь п�
 ## Universal executor — разработка 2026-11-05
 
 В ветке codex/universal-executor-plan реализованы отдельное разрешение UI, protocol v2, общая очередь batch/execute, JS/TS compiler, JSON resources и каталог API. Проверки были перенесены пользователем на завершение цикла разработки. Прежние результаты MVP не доказывают совместимость этого механизма. Desktop-проба подготовлена, но пока не запускалась; поддержка AsyncFunction, Undo и поведения после обрыва требует фактической приёмки.
+
+После завершения разработки полный npm test прошёл, включая новый сквозной SDK→WebSocket→UI→runtime сценарий JS/TS, errors after write, ресурсы и dedup. Дополнительно прошли тесты timeout/recovery/cancel, production install без devDependencies и OpenSpec strict validation. Это автоматическая приёмка с симулированным Plugin API; Desktop пока не проверен. Подробности: openspec/changes/universal-executor/verification.md.
