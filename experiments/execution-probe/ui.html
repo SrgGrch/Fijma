@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>Executor isolated probe</title>
+<p>Use only a disposable file. Capture Figma Desktop version and transcript manually.</p>
+<button data-probe="read">Async JSON read</button><button data-probe="throw">Async throw</button><button data-probe="cooperative">Yield loop</button><button data-probe="stop">Stop</button><button data-probe="blocking">Finite blocking loop</button><button data-probe="write">Write, throw, commitUndo</button><button data-probe="await">Await 5 seconds</button>
+<pre id="output" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+<script>
+const output = document.getElementById('output');
+document.querySelectorAll('button').forEach(button => button.onclick = () => parent.postMessage({ pluginMessage: button.dataset.probe }, '*'));
+window.onmessage = event => { output.textContent += JSON.stringify(event.data.pluginMessage) + '\n'; };
+</script>
