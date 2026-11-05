@@ -37,6 +37,11 @@ const outOfOrder = new ExecutionTransfer(scope); outOfOrder.accept(header); asse
 const wrongScope = new ExecutionTransfer(scope); assert.throws(() => wrongScope.accept({ ...header, sessionId: 'other' }));
 const badBytes = new ExecutionTransfer(scope); badBytes.accept(header); assert.throws(() => badBytes.accept({ ...part(0), data: 'YWJj' }));
 const { ExportResourceStore } = await load('server/export-resources.ts');
+const { safeExecutionError } = await load('server/safe-error.ts');
+const secret = 'a'.repeat(64);
+const safe = safeExecutionError({ code: 'FIGMA_API_ERROR', message: `Missing font ${secret} ${'x'.repeat(1200)}`, phase: 'execute', line: 2, column: 0 }, secret);
+assert.ok(safe.message.startsWith('Missing font [redacted]')); assert.ok(!safe.message.includes(secret));
+assert.equal(safe.message.length, 1000); assert.equal(safe.phase, 'execute'); assert.equal(safe.line, 2); assert.equal(safe.column, 0);
 let now = 0; const store = new ExportResourceStore({ ttl: 100, maxEntries: 2, maxBytes: 100, maxResourceBytes: 100 }, () => now);
 store.beginSession('session'); const resource = store.putExecution('session', data);
 assert.equal(store.read('session', resource.uri).mimeType, 'application/json');

@@ -7,3 +7,9 @@ export function safeError(error: { code: string; details?: unknown }, secret: st
   const details = error.code === 'FONT_UNAVAILABLE' && fonts.success && !JSON.stringify(fonts.data).includes(secret) ? { details: fonts.data } : {};
   return { code: error.code, message: 'Operation in Figma failed.', recoveryAction: 'Check the error code and reread the context.', ...details };
 }
+
+export function safeExecutionError(error: { code: string; message: string; phase?: string; line?: number; column?: number }, secret: string) {
+  return { ...safeError(error, secret), message: error.message.replaceAll(secret, '[redacted]').slice(0, 1000),
+    ...(error.phase ? { phase: error.phase } : {}), ...(error.line !== undefined ? { line: error.line } : {}),
+    ...(error.column !== undefined ? { column: error.column } : {}) };
+}

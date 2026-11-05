@@ -23,7 +23,7 @@ try {
   assert.equal(invalid.isError, true);
   await assert.rejects(client.callTool({ name: 'execute_js', arguments: {} }));
   assert.equal((await client.callTool({ name: 'figma_get_context', arguments: {} })).structuredContent.state, 'disconnected');
-  console.log('MCP stdio: 10 инструментов, схемы, disconnected, tool/protocol errors и повторный вызов — OK');
+  console.log('MCP stdio: 11 инструментов, схемы, disconnected, tool/protocol errors и повторный вызов — OK');
 } finally {
   await client.close();
 }

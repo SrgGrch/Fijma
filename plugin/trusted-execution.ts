@@ -38,9 +38,15 @@ export class TrustedExecution {
       const localConsole: Record<string, (...args: unknown[]) => void> = {};
       for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) localConsole[level] = (...args) => {
         if (logsTruncated) return;
-        let message: string;
-        try { message = args.map(v => typeof v === 'string' ? v : executionJson(v, executionLimits.maxLogBytes).json).join(' '); }
-        catch { message = '[unserializable]'; }
+        let message = '';
+        if (args.length > executionLimits.maxValues) { logsTruncated = true; return; }
+        for (const value of args) {
+          let part: string;
+          try { part = typeof value === 'string' ? value : executionJson(value, executionLimits.maxLogBytes - logBytes).json; }
+          catch { part = '[unserializable]'; }
+          if (utf8Bytes(part) + utf8Bytes(message) + logBytes + 1 > executionLimits.maxLogBytes) { logsTruncated = true; return; }
+          message += (message ? ' ' : '') + part;
+        }
         const bytes = utf8Bytes(JSON.stringify({ level, message }));
         if (logs.length >= executionLimits.maxLogEntries || logBytes + bytes > executionLimits.maxLogBytes) { logsTruncated = true; return; }
         logs.push({ level, message }); logBytes += bytes;
@@ -61,9 +67,10 @@ export class TrustedExecution {
         result.value = dto.value;
         result.status = 'succeeded';
       } catch (error) {
-        const code = error instanceof Error ? error.message : '';
+        let code = '';
+        try { const descriptor = error && typeof error === 'object' && Object.getOwnPropertyDescriptor(error, 'message'); if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') code = descriptor.value; } catch { /* A trusted script can throw a proxy. */ }
         const serialize = serializing;
-        result.status = code === 'CANCELLED' ? 'cancelled' : 'failed';
+        result.status = !serialize && job.cancelled && code === 'CANCELLED' ? 'cancelled' : 'failed';
         if (result.status === 'failed') result.error = {
           code: serialize ? code === 'RESOURCE_LIMIT' ? code : 'RESULT_NOT_SERIALIZABLE' : started ? 'FIGMA_API_ERROR' : ['EXECUTION_DISABLED', 'SESSION_EXPIRED', 'DOCUMENT_MISMATCH'].includes(code) ? code : 'FIGMA_API_ERROR',
           phase: serialize ? 'serialize' : started ? 'execute' : 'prepare',

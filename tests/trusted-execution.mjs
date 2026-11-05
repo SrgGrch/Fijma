@@ -29,7 +29,14 @@ const bad = await trusted.submit(scope, id(3), { language: 'javascript', code: '
 assert.equal(bad.error.code, 'RESULT_NOT_SERIALIZABLE');
 assert.equal(bad.error.phase, 'serialize');
 assert.equal(bad.effects, 'unknown');
+const thrown = await trusted.submit(scope, id(4), { language: 'javascript', code: 'throw', compiledCode: "throw Error('CANCELLED');" }, now);
+assert.equal(thrown.status, 'failed');
+assert.equal(thrown.error.phase, 'execute');
+const logging = await trusted.submit(scope, id(5), { language: 'javascript', code: 'log', compiledCode: "console.log('x'.repeat(9000)); return null;" }, now);
+assert.equal(logging.logsTruncated, true);
+assert.equal(logging.logs.length, 0);
 assert.throws(() => executionJson({ get x() { return 1; } }), /RESULT_NOT_SERIALIZABLE/);
+assert.throws(() => executionJson(Object.defineProperty({}, 'x', { get() { throw Error('must not run'); } })), /RESULT_NOT_SERIALIZABLE/);
 assert.throws(() => executionJson(1n), /RESULT_NOT_SERIALIZABLE/);
 assert.throws(() => executionJson(Object.fromEntries(Array.from({ length: 10001 }, (_, i) => [String(i), null]))), /RESULT_NOT_SERIALIZABLE/);
 assert.throws(() => executionJson('a'.repeat(262145)), /RESOURCE_LIMIT/);

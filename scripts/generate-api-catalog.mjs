@@ -30,10 +30,12 @@ declarations.set(first, prelude + declarations.get(first));
 if ([...declarations.values()].reduce((n, value) => n + value.length, 0) !== source.length) throw new Error('Declaration accounting failed');
 const names = [...declarations.keys()].sort();
 const chunk = (text) => {
-  const pages = []; let current = '';
+  const pages = []; let current = '', bytes = 2;
   for (const character of text) {
-    if (Buffer.byteLength(JSON.stringify(current + character), 'utf8') > 12000) { pages.push(current); current = ''; }
+    const characterBytes = Buffer.byteLength(JSON.stringify(character), 'utf8') - 2;
+    if (bytes + characterBytes > 12000) { pages.push(current); current = ''; bytes = 2; }
     current += character;
+    bytes += characterBytes;
   }
   if (current || !pages.length) pages.push(current);
   return pages;

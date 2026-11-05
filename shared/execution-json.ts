@@ -18,7 +18,13 @@ export function executionJson(value: unknown, maxBytes: number = executionLimits
     const ownKeys = Reflect.ownKeys(item);
     if (ownKeys.length > executionLimits.maxValues + (Array.isArray(item) ? 1 : 0) || ownKeys.some(key => typeof key !== 'string')) throw new Error('RESULT_NOT_SERIALIZABLE');
     let result = append(Array.isArray(item) ? '[' : '{');
-    const keys = Array.isArray(item) ? Array.from({ length: item.length }, (_, i) => String(i)) : (ownKeys as string[]).filter(k => Object.getOwnPropertyDescriptor(item, k)?.enumerable);
+    const enumerable: string[] = [];
+    for (const key of ownKeys as string[]) {
+      const descriptor = Object.getOwnPropertyDescriptor(item, key);
+      if (!descriptor || !('value' in descriptor)) throw new Error('RESULT_NOT_SERIALIZABLE');
+      if (descriptor.enumerable) enumerable.push(key);
+    }
+    const keys = Array.isArray(item) ? Array.from({ length: item.length }, (_, i) => String(i)) : enumerable;
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i], descriptor = Object.getOwnPropertyDescriptor(item, key);
       if (!descriptor || !('value' in descriptor)) throw new Error('RESULT_NOT_SERIALIZABLE');

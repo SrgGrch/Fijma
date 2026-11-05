@@ -9,7 +9,7 @@ import { diagnosticControlSchema, operationReplySchema } from '../shared/ui-mess
 import { exportStartSchema, exportChunkSchema, exportErrorSchema } from '../shared/export-wire';
 import { ExportTransfer } from './export-transfer';
 import { createDiagnosticsSession } from './diagnostics-session';
-import { safeError as sanitizeError } from './safe-error';
+import { safeError as sanitizeError, safeExecutionError } from './safe-error';
 import { compileExecution } from './execution-compiler';
 import { ExecutionTransfer } from './execution-transfer';
 import { executionLimits } from '../shared/execution-limits';
@@ -166,7 +166,7 @@ export async function createPairingListener(secret: string, port: number, diagno
                   if ('kind' in reply.data && reply.data.kind === 'execute') {
                     if (!['queued', 'running', 'unknown'].includes(reply.data.status)) unfinished.delete(reply.operationId);
                     const error = reply.data.error;
-                    operation.resolve({ ...reply.data, ...(error ? { error: { ...safeError(error), ...(error.phase ? { phase: error.phase } : {}), ...(error.line ? { line: error.line } : {}), ...(error.column ? { column: error.column } : {}) } } : {}), ...(operation.resource ? { executionResourceData: operation.resource } : {}) });
+                    operation.resolve({ ...reply.data, ...(error ? { error: safeExecutionError(error, secret) } : {}), ...(operation.resource ? { executionResourceData: operation.resource } : {}) });
                     return;
                   }
                   journal?.operationCompleted(operation.action, timing, reply.data);
@@ -271,6 +271,7 @@ export async function createPairingListener(secret: string, port: number, diagno
 
   async function execute(command: 'applyBatch' | 'getOperation' | 'cancel' | 'execute', raw: unknown) {
     if (!active || !binding) throw new Error('NOT_CONNECTED');
+    const requestSocket = active;
     const schema = { applyBatch: toolInputs.figma_apply_batch, getOperation: toolInputs.figma_get_operation, cancel: toolInputs.figma_cancel_operation, execute: toolInputs.figma_execute }[command];
     const input = schema.parse(raw);
     if (input.scope.sessionId !== binding.sessionId || input.scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
@@ -282,7 +283,7 @@ export async function createPairingListener(secret: string, port: number, diagno
     const requestId = randomUUID();
     if (command === 'execute' && (utf8Bytes((params as any).code) > 32768 || utf8Bytes(JSON.stringify((params as any).args ?? null)) > 8192)) throw new Error('RESOURCE_LIMIT');
     const compiledCode = command === 'execute' ? await compileExecution((params as any).language, (params as any).code) : undefined;
-    if (!active || !binding || scope.sessionId !== binding.sessionId || scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
+    if (active !== requestSocket || !binding || scope.sessionId !== binding.sessionId || scope.connectionGeneration !== binding.connectionGeneration) throw new Error('SESSION_EXPIRED');
     if (command === 'execute' && (pending || drainingActive())) throw new Error('RESOURCE_LIMIT');
     const wire = JSON.stringify({ type: 'command', ...scope, operationId: id, requestId, command, params: compiledCode === undefined ? params : { ...params, compiledCode } });
     if (utf8Bytes(wire) > binding.limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');

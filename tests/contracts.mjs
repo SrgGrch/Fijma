@@ -11,6 +11,7 @@ const examples = {
   figma_get_nodes: { scope, nodeIds: ['1:1'], fields: ['name'] },
   figma_get_local_resources: { scope, kind: 'variables', fields: ['name'], limit: 10 },
   figma_navigate: { scope, nodeIds: [], select: false, reveal: false },
+  figma_execute: { scope, operationId, language: 'javascript', code: 'return null;' },
   figma_apply_batch: { scope, operationId, steps: [create] },
   figma_get_operation: { scope, operationId }, figma_cancel_operation: { scope, operationId },
   figma_export_node: { scope, nodeId: '1:1', format: 'PNG', scale: 1 },
