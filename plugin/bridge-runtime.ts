@@ -16,13 +16,13 @@ import { verifyWrite } from './write-verification';
 import { ExecutionQueue } from '../shared/execution-queue';
 import { TrustedExecution } from './trusted-execution';
 
-export function createBridgeRuntime(diagnostic?: { run: (command: any, scope: { sessionId: string; connectionGeneration: number }, checkScope: () => void) => Promise<unknown> }, candidate = false) {
+export function createBridgeRuntime() {
 const documentRoot = figma.root;
 const checkDocument = () => { if (figma.root !== documentRoot) throw new Error('DOCUMENT_MISMATCH'); };
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 let awaitingWelcome = false;
 let connectionGeneration: number | undefined;
-const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel', 'execute'] : [])];
+const capabilities = ['getContext', 'getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel', 'execute'];
 let writeEnabled = false;
 let executeEnabled = false;
 let limits = bootstrapLimits;
@@ -83,13 +83,13 @@ return async (message: any) => {
   if (!message || typeof message !== 'object') return;
   if (scheduler.accept(message)) return;
   if (message.type === 'setWriteEnabled' && typeof message.enabled === 'boolean' && Object.keys(message).length === 2) {
-    writeEnabled = candidate && message.enabled && connectionGeneration !== undefined;
+    writeEnabled = message.enabled && connectionGeneration !== undefined;
     if (!writeEnabled) executor.stop();
     figma.ui.postMessage({ type: 'writeState', enabled: writeEnabled, ...(!writeEnabled && message.enabled ? { reason: 'CAPABILITY_UNAVAILABLE' } : {}) });
     return;
   }
   if (message.type === 'setExecuteEnabled' && typeof message.enabled === 'boolean' && Object.keys(message).length === 2) {
-    executeEnabled = candidate && message.enabled && connectionGeneration !== undefined;
+    executeEnabled = message.enabled && connectionGeneration !== undefined;
     if (!executeEnabled) queue.stop('execute');
     figma.ui.postMessage({ type: 'executeState', enabled: executeEnabled, ...(!executeEnabled && message.enabled ? { reason: 'CAPABILITY_UNAVAILABLE' } : {}) });
     return;
@@ -103,10 +103,10 @@ return async (message: any) => {
     connectionGeneration = undefined;
     pager.clear(); search.clear(); resources.clear(); scheduler.release();
     figma.ui.postMessage({ type: 'hello', protocolVersion: PROTOCOL_VERSION, sessionId,
-      capabilities, limits: bootstrapLimits, writeEnabled: Boolean(diagnostic) });
+      capabilities, limits: bootstrapLimits, writeEnabled: false });
   } else if (message.type === 'welcome' && awaitingWelcome) {
     const parsed = welcomeSchema.safeParse(message);
-    if (!parsed.success || parsed.data.sessionId !== sessionId || parsed.data.writeEnabled !== Boolean(diagnostic) ||
+    if (!parsed.success || parsed.data.sessionId !== sessionId || parsed.data.writeEnabled ||
       JSON.stringify(parsed.data.capabilities) !== JSON.stringify(capabilities)) {
       awaitingWelcome = false;
       figma.ui.postMessage({ type: 'error', code: 'PROTOCOL_MISMATCH' });
@@ -121,7 +121,7 @@ return async (message: any) => {
     resources = new ResourcePager(limits);
     awaitingWelcome = false;
     figma.ui.postMessage({ type: 'bound', sessionId, connectionGeneration, documentLabel: figma.root.name,
-      writeEnabled: Boolean(diagnostic), message: diagnostic ? 'Диагностика: разрешено только создание тестового маркера.' : 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
+      writeEnabled: false, message: 'Сопряжено. Доступно чтение контекста и дерева. Запись выключена.' });
   } else if (message.type === 'disconnected' && Object.keys(message).length === 1) {
     awaitingWelcome = false;
     writeEnabled = false; executeEnabled = false; queue.stop();
@@ -145,11 +145,11 @@ return async (message: any) => {
       if (connectionGeneration === undefined) throw new Error('SESSION_EXPIRED');
       checkDocument();
       command = validateCommand(message, { sessionId, connectionGeneration });
-      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', ...(diagnostic ? ['applyBatch'] : candidate ? ['applyBatch', 'getOperation', 'cancel', 'execute'] : [])].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
+      if (!['getTree', 'findNodes', 'getNodes', 'getLocalResources', 'navigate', 'exportNode', 'applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) throw new Error('CAPABILITY_UNAVAILABLE');
       if (reading && !['applyBatch', 'getOperation', 'cancel'].includes(command.command) || queue.hasExecute && !['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) throw new Error('RESOURCE_LIMIT');
     } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && ['DOCUMENT_MISMATCH', 'SESSION_EXPIRED', 'RESOURCE_LIMIT', 'CAPABILITY_UNAVAILABLE'].includes(error.message) ? error.message : 'INVALID_ARGUMENT' }); return; }
     const scope = { sessionId, connectionGeneration };
-    if (candidate && ['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) {
+    if (['applyBatch', 'getOperation', 'cancel', 'execute'].includes(command.command)) {
       try {
         if (jsonMessageBytes(message) > limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
         let data;
@@ -198,15 +198,6 @@ return async (message: any) => {
       return;
     }
     reading = true;
-    if (command.command === 'applyBatch' && diagnostic) {
-      try {
-        if (jsonMessageBytes(message) > limits.maxMessageBytes) throw new Error('RESOURCE_LIMIT');
-        const data = await diagnostic.run(command, scope, () => { checkDocument(); if (scope.connectionGeneration !== connectionGeneration) throw new Error('SESSION_EXPIRED'); });
-        figma.ui.postMessage({ type: 'operationResult', ...scope, operationId: command.operationId, ...(message.requestId ? { requestId: message.requestId } : {}), data });
-      } catch (error) { figma.ui.postMessage({ type: 'error', code: error instanceof Error && ['SESSION_EXPIRED', 'DOCUMENT_MISMATCH', 'RESOURCE_LIMIT'].includes(error.message) ? error.message : 'INVALID_ARGUMENT' }); }
-      finally { reading = false; }
-      return;
-    }
     const replyType = { getTree: 'treeResult', findNodes: 'searchResult', getNodes: 'nodesResult', getLocalResources: 'resourcesResult', navigate: 'navigateResult', exportNode: 'exportError' };
     const reply = { type: replyType[command.command as keyof typeof replyType], ...scope, operationId: command.operationId };
     try {

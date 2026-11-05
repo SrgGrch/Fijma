@@ -1,9 +1,0 @@
-{
-  "name": "Figma MCP Bridge — проверка экспорта",
-  "api": "1.0.0",
-  "main": "main.js",
-  "ui": "ui.html",
-  "editorType": ["figma"],
-  "documentAccess": "dynamic-page",
-  "networkAccess": { "allowedDomains": ["none"] }
-}

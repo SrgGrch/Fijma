@@ -1,4 +1,4 @@
-# Технический проект Figma MCP Bridge MVP
+# Технический проект Fijma MVP
 
 ## Context
 

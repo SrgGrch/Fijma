@@ -1,4 +1,4 @@
-# Figma MCP Bridge MVP
+# Fijma MVP
 
 ## Why
 

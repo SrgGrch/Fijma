@@ -80,7 +80,7 @@ try {
       if (message.type === 'yield' && holding && count >= 2) { heldYield = message; return; }
       queueMicrotask(() => ui.onmessage({ data: { pluginMessage: message } }));
     } } };
-  runInNewContext(await readFile('dist/candidate/main.js', 'utf8'), { figma, __html__: '' });
+  runInNewContext(await readFile('dist/plugin/main.js', 'utf8'), { figma, __html__: '' });
   class Socket extends WebSocket { constructor() { super(`ws://127.0.0.1:${port}`); sockets.push(this); } }
   elements = createUIElements();
   const visibilityListeners = {};

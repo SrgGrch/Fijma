@@ -18,7 +18,7 @@ try {
   secretPath = diagnostics.match(/Файл сопряжения: ([^\r\n]+)/)[1];
   const url = diagnostics.match(/Локальный мост: (ws:\/\/[^\r\n]+)/)[1];
   const token = await readFile(secretPath, 'utf8');
-  const main = await readFile('dist/candidate/main.js', 'utf8');
+  const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
   const elements = createUIElements();
   const nodes = new Map(); let count = 0;
@@ -71,7 +71,7 @@ try {
   assert.equal(result.steps[1].appliedChanges.details.find(x => x.textSegments).textSegments[0].characters, 'Hello');
   assert.equal(result.steps[2].appliedChanges.details.find(x => x.nodeId === frameId).properties.layoutMode, 'HORIZONTAL');
   assert.ok(result.steps[2].appliedChanges.details.some(x => x.nodeId === textId && x.properties.width === 100));
-  console.log('Candidate fakeFigma SDK: frame, text and layout readback OK');
+  console.log('Production fakeFigma SDK: frame, text and layout readback OK');
 } finally {
   clearTimeout(deadline);
   for (const socket of sockets) socket.terminate();

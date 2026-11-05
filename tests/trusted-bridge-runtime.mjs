@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-const source = await readFile('dist/candidate/main.js', 'utf8');
+const source = await readFile('dist/plugin/main.js', 'utf8');
 const messages = [], events = [];
 let release;
 const wait = new Promise(resolve => { release = resolve; });

@@ -18,7 +18,7 @@ try {
   secretPath = diagnostics.match(/Файл сопряжения: ([^\r\n]+)/)[1];
   const url = diagnostics.match(/Локальный мост: (ws:\/\/[^\r\n]+)/)[1];
   const token = await readFile(secretPath, 'utf8');
-  const main = await readFile('dist/candidate/main.js', 'utf8');
+  const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
   const elements = createUIElements();
   const nodes = new Map(); let count = 0;
@@ -117,7 +117,7 @@ try {
   assert.equal(unknown.error.code, 'OPERATION_NOT_OWNED');
   const expired = (await client.callTool({ name: 'figma_get_operation', arguments: { scope: newScope, operationId: timeoutId } })).structuredContent;
   assert.equal(expired.error.code, 'SESSION_EXPIRED'); assert.equal(count, 3);
-  console.log('Candidate fakeFigma SDK recovery: disconnect, reconnect, conflict and timeout OK');
+  console.log('Production fakeFigma SDK recovery: disconnect, reconnect, conflict and timeout OK');
 } finally {
   clearTimeout(deadline);
   for (const socket of sockets) socket.terminate();

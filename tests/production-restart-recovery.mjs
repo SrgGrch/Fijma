@@ -33,7 +33,7 @@ async function ready() {
 }
 try {
   await start(1000);
-  const main = await readFile('dist/candidate/main.js', 'utf8');
+  const main = await readFile('dist/plugin/main.js', 'utf8');
   const html = await readFile('dist/plugin/ui.html', 'utf8');
   const elements = createUIElements();
   let count = 0, ui;

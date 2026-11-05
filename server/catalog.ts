@@ -38,13 +38,13 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
   applyBatch?: (args: unknown) => Promise<unknown>, getOperation?: (args: unknown) => Promise<unknown>, cancelOperation?: (args: unknown) => Promise<unknown>, beforeRequest?: () => void,
   pairingPath = join(homedir(), '.figma-mcp-bridge', 'pairing-secret.txt'), execute?: (args: unknown) => Promise<unknown>) {
   const copyCommand = `Get-Content -Raw -LiteralPath '${pairingPath.replaceAll("'", "''")}' | Set-Clipboard`;
-  const server = new McpServer({ name: 'figma-mcp-bridge', version: '0.1.0' }, {
+  const server = new McpServer({ name: 'Fijma', version: '0.1.0' }, {
     instructions: [
       'На вопросы о текущем файле Figma сначала вызывай figma_get_context; не угадывай открытый файл.',
       'Мост закреплён за файлом, где запущен плагин, и работает в фоне. Контекст показывает подключённый файл, не обязательно активную вкладку Figma. Переключение окон или файлов не меняет адресата команд; для другого файла нужно явно отключить прежний плагин и подключить новый.',
-      'Если figma_get_context вернул state=disconnected или инструмент вернул NOT_CONNECTED, сразу сообщи: «fijma сейчас отключена от Figma», и в том же ответе дай шаги подключения, без дополнительного вопроса пользователю.',
+      'Если figma_get_context вернул state=disconnected или инструмент вернул NOT_CONNECTED, сразу сообщи: «Fijma сейчас отключена от Figma», и в том же ответе дай шаги подключения, без дополнительного вопроса пользователю.',
       `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
-      'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Figma MCP Bridge, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',
+      'Затем: открой нужный Design-файл в Figma Desktop, запусти development-плагин Fijma, вставь ключ и нажми «Подключиться и запомнить». После подключения повторно вызови figma_get_context и отвечай по свежему контексту.',
       'Сам не читай ключ, не копируй его автоматически и не проси прислать его в чат. Не раскрывай содержимое pairing-secret.txt в MCP-ответах или сообщениях; показывай только команду для локального копирования.',
       'SESSION_BUSY не требует закрытия другого MCP-клиента. Команды клиентов выполняются по FIFO. QUEUE_TIMEOUT означает, что команда не была отправлена в Figma. RECOVERY_REQUIRED означает незавершённую операцию: проверь её статус; если завершение не подтверждено, закрой и заново запусти плагин. Закрывать подключения других клиентов не нужно.',
       'figma_execute доступен только после отдельного разрешения доверенного кода в UI (executeEnabled). Код — тело async-функции: return JSON; доступны figma, args, console и execution.yield()/execution.checkCancelled().',
