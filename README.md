@@ -81,7 +81,23 @@ Alternatively, add the same `mcpServers` object with `command` and `args` to `%U
 
 Restart or refresh the client's MCP connection. The adapter automatically starts the shared local bridge. It prints the path to `pairing-secret.txt` to stderr. If the client does not show stderr, run `node scripts/manual-client.mjs` from the project root: it displays the path and lets you send MCP requests as one JSON object per line.
 
-Open the key file locally, paste it into the plugin panel, and click **«Подключиться и запомнить»** (“Connect and remember”). Do not send the key in chat. Call `figma_get_context`: the status should be `ready`, and the document name should match the intended file. Enable the toggle in the plugin panel to allow writes; writes are disabled again on a new connection. Other tools use the `scope` (`sessionId` and `connectionGeneration`) from the current context. See [launch and pairing](docs/launch.md) for details.
+Open the key file locally, paste it into the plugin panel, and click **«Подключиться и запомнить»** (“Connect and remember”). Do not send the key in chat. Call `figma_get_context`: the status should be `ready`, and the document name should match the intended file. Enable the toggle in the plugin panel to allow writes; writes are disabled again on a new connection. Plugin-backed tools use the `scope` (`sessionId` and `connectionGeneration`) from the current context. See [launch and pairing](docs/launch.md) for details.
+
+### Reading comments
+
+Use `figma_get_comments` with the file or branch key from its Figma link and `status: "unresolved"` or `status: "resolved"`. Each thread includes the root comment and its replies. The tool works without plugin pairing. Both statuses and all pages share a 60-second cache per file. Set `forceReload: true` to refresh it. [Request examples](docs/launch.md#чтение-комментариев).
+
+#### Figma token setup
+
+1. In Figma, open **Settings → Security → Personal access tokens → Generate new token**. Set an expiration and select the `file_comments:read` scope. Use an account with access to the files you want to read. [Figma token documentation](https://developers.figma.com/docs/rest-api/personal-access-tokens/).
+2. Set `FIGMA_MCP_ACCESS_TOKEN` in the environment that launches your MCP client. On Windows, you can set it as a user environment variable. In Codex, add this line to the existing `[mcp_servers.fijma]` table in `%USERPROFILE%\.codex\config.toml`. If `env_vars` already exists, add the name to that list.
+
+   ```toml
+   env_vars = ["FIGMA_MCP_ACCESS_TOKEN"]
+   ```
+
+   If your client configures environment variables through an `env` object, set `FIGMA_MCP_ACCESS_TOKEN` in the local `fijma` server configuration. [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#stdio-servers).
+3. Run `npm run stop` from the project root and restart the MCP client. The shared bridge reads the token from the environment of the adapter that starts it. Repeat this step when you rotate the token.
 
 ## Building locally
 

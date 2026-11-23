@@ -8,6 +8,7 @@ import { treeOutputSchema, searchOutputSchema } from '../shared/tree-result';
 import { nodesOutputSchema, resourcesOutputSchema, navigateOutputSchema, operationOutputSchema, exportOutputSchema, inlinePngTransferSchema } from '../shared/operation-result';
 import { executionOutputSchema, anyOperationOutputSchema } from '../shared/execution-contracts';
 import { registerApiCatalog } from './api-catalog';
+import { registerComments } from './comments';
 import { CompilationError } from './execution-compiler';
 
 const outputSchemas = {
@@ -40,7 +41,8 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
   const copyCommand = `Get-Content -Raw -LiteralPath '${pairingPath.replaceAll("'", "''")}' | Set-Clipboard`;
   const server = new McpServer({ name: 'Fijma', version: '0.1.0' }, {
     instructions: [
-      'На вопросы о текущем файле Figma сначала вызывай figma_get_context; не угадывай открытый файл.',
+      'Перед работой с текущим файлом через плагин сначала вызывай figma_get_context; не угадывай открытый файл.',
+      'Для чтения обсуждений используй figma_get_comments с ключом из ссылки Figma и статусом unresolved или resolved. Инструмент работает отдельно от плагина. Если ключ или ссылка неизвестны, запроси ссылку на нужный файл.',
       'Мост закреплён за файлом, где запущен плагин, и работает в фоне. Контекст показывает подключённый файл, не обязательно активную вкладку Figma. Переключение окон или файлов не меняет адресата команд; для другого файла нужно явно отключить прежний плагин и подключить новый.',
       'Если figma_get_context вернул state=disconnected или инструмент вернул NOT_CONNECTED, сразу сообщи: «Fijma сейчас отключена от Figma», и в том же ответе дай шаги подключения, без дополнительного вопроса пользователю.',
       `Предложи пользователю выполнить в PowerShell команду копирования ключа: ${copyCommand}`,
@@ -53,6 +55,7 @@ export function createServer(getContext: () => Promise<unknown> = async () => di
     ].join('\n'),
   });
   registerApiCatalog(server);
+  registerComments(server);
   if (readResource) server.registerResource('figma-export', new ResourceTemplate('figma-resource://export/{token}', { list: undefined }),
     { description: 'Экспорт текущей сессии; истекает не позднее указанного срока.' }, async uri => {
       try { beforeRequest?.(); }
