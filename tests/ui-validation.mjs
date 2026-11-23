@@ -147,4 +147,35 @@ for (const reason of ['SESSION_BUSY', 'AUTH_FAILED', 'PROTOCOL_MISMATCH', 'priva
   assert.match(h.elements.operation.textContent, /Ожидаем команды/);
   send(idA, 'applyBatch', { steps }, requestA); h.elements.disconnect.onclick(); assert.match(h.elements.operation.textContent, /Ожидаем команды/);
 }
+{
+  const h = ready();
+  const { collapse, expand, 'full-panel': full, 'compact-panel': compact, 'compact-status': status } = h.elements;
+  assert.ok(collapse && expand, 'both window controls must be available');
+  collapse.click();
+  assert.equal(full.hidden, true);
+  assert.equal(compact.hidden, false);
+  assert.equal(expand.focused, true);
+  assert.equal(h.sentMain.at(-1).type, 'ui-compact');
+  assert.equal(h.sentMain.at(-1).compact, true);
+  assert.equal(status.textContent, 'Мост подключён');
+
+  h.server(command);
+  assert.match(status.textContent, /navigate/);
+  h.main({ type: 'navigateResult', sessionId: 's', connectionGeneration: 1, operationId, data: { currentPageId: '0:1', selection: [] } });
+  assert.equal(status.textContent, 'Мост подключён');
+  assert.equal(h.socket.sent.at(-1).type, 'navigateResult');
+
+  expand.click();
+  assert.equal(full.hidden, false);
+  assert.equal(compact.hidden, true);
+  assert.equal(collapse.focused, true);
+  assert.equal(h.sentMain.at(-1).compact, false);
+  assert.equal(h.sockets.length, 1);
+  assert.equal(h.socket.readyState, 1);
+  assert.equal(h.elements.document.textContent, 'Test');
+
+  collapse.click();
+  h.socket.onclose({ reason: '' });
+  assert.equal(status.textContent, 'Ждём локальный мост');
+}
 console.log('UI message validation: phases, version, scope, schema, navigation and ACK OK');

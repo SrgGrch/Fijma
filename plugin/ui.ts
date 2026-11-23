@@ -10,6 +10,11 @@ const write = element('write') as HTMLInputElement;
 const stop = element('stop') as HTMLButtonElement;
 const forget = element('forget') as HTMLButtonElement;
 const resume = element('resume') as HTMLButtonElement;
+const fullPanel = element('full-panel');
+const compactPanel = element('compact-panel');
+const compactStatus = element('compact-status');
+const collapse = element('collapse');
+const expand = element('expand');
 const sendMain = (message: unknown) => parent.postMessage({ pluginMessage: message }, '*');
 let credential = '';
 let saved = false;
@@ -27,14 +32,37 @@ const descriptions: Record<string, string> = {
   DOCUMENT_MISMATCH: 'Документ изменился. Откройте плагин в нужном файле заново.',
   SESSION_EXPIRED: 'Сессия истекла. Подключитесь заново и перечитайте контекст.',
 };
+function updateCompactStatus() {
+  let title = element('status').textContent;
+  let kind = element('connection').dataset.state ?? 'offline';
+  if (kind === 'ready') {
+    if (element('activity').dataset.active === 'true') {
+      const command = element('operation').textContent?.split(' (', 1)[0];
+      title = `Выполняется ${command}`;
+    } else if (!element('error-panel').hidden) {
+      kind = 'error';
+      title = 'Требуется внимание';
+    }
+  }
+  compactPanel.dataset.state = kind;
+  if (compactStatus.textContent !== title) compactStatus.textContent = title;
+}
+function setCompact(compact: boolean) {
+  fullPanel.hidden = compact;
+  compactPanel.hidden = !compact;
+  sendMain({ type: 'ui-compact', compact });
+  (compact ? expand : collapse).focus();
+}
 function showError(message: string) {
   element('last-error').textContent = descriptions[message] ?? message;
   element('error-panel').hidden = !message;
+  updateCompactStatus();
 }
 function state(kind: string, title: string, help: string) {
   element('connection').dataset.state = kind;
   element('status').textContent = title;
   element('connection-help').textContent = help;
+  updateCompactStatus();
 }
 function pairingView() {
   element('pairing-panel').hidden = !!credential;
@@ -79,6 +107,7 @@ const controller = createBridgeController({
   setOperation: operation => {
     element('operation').textContent = operation || 'Ожидаем команды';
     element('activity').dataset.active = String(!!operation);
+    updateCompactStatus();
   },
   setWriteState: (enabled, reason) => {
     write.checked = enabled;
@@ -112,6 +141,8 @@ const controller = createBridgeController({
     }
   },
 });
+collapse.onclick = () => setCompact(true);
+expand.onclick = () => setCompact(false);
 connect.onclick = () => {
   const token = secret.value.trim(); secret.value = '';
   if (!pairingSecret.safeParse(token).success) { showError('Введите ключ из 64 символов из локального файла сопряжения.'); secret.focus(); return; }
