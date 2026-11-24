@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 const source = await readFile('dist/plugin/main.js', 'utf8');
-const messages = [];
+const messages = [], sizes = [];
+let initialSize;
 let loaded = false, invalidate;
 const otherPage = { id: '0:2', name: 'Other', type: 'PAGE', async loadAsync() { loaded = true; }, on(_event, handler) { invalidate = handler; },
   get children() { assert.equal(loaded, true); return [{ id: '2:1', name: 'Child', type: 'RECTANGLE' }]; } };
-const figma = { showUI() {}, root: { name: '<Document>', children: [{ id: '0:1', name: 'Page', get children() { throw new Error('Page contents loaded'); } }, otherPage] },
-  currentPage: { id: '0:1', selection: [{ id: '1:1' }] }, ui: { postMessage: message => messages.push(message) } };
+const figma = { showUI(_html, { width, height }) { initialSize = [width, height]; }, root: { name: '<Document>', children: [{ id: '0:1', name: 'Page', get children() { throw new Error('Page contents loaded'); } }, otherPage] },
+  currentPage: { id: '0:1', selection: [{ id: '1:1' }] }, ui: { postMessage: message => messages.push(message), resize: (width, height) => sizes.push([width, height]) } };
 runInNewContext(source, { figma, __html__: '' });
 figma.ui.onmessage({ type: 'hello-request' });
 const hello = messages.pop();
@@ -25,6 +26,12 @@ assert.equal(messages.pop().code, 'PROTOCOL_MISMATCH');
 figma.ui.onmessage({ type: 'hello-request' }); messages.pop();
 figma.ui.onmessage(welcome);
 assert.equal(messages.pop().type, 'bound');
+figma.ui.onmessage({ type: 'ui-compact', compact: true });
+figma.ui.onmessage({ type: 'ui-compact', compact: false });
+assert.equal(sizes.length, 2, 'the open window must resize in both directions');
+assert.ok(sizes[0][0] < initialSize[0] && sizes[0][1] < initialSize[1]);
+assert.deepEqual(sizes[1], initialSize);
+assert.equal(messages.length, 0);
 figma.ui.onmessage({ type: 'getContext', requestId: 'context-1', sessionId: hello.sessionId, connectionGeneration: 10 });
 const document = messages.pop().document;
 assert.equal(document.pages[0].name, 'Page');

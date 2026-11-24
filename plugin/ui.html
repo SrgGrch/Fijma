@@ -32,14 +32,18 @@ header { display: flex; align-items: center; gap: 11px; padding: 20px 22px 17px;
 .mark svg { width: 23px; height: 23px; }
 h1 { font-size: 15px; line-height: 1.25; font-weight: 650; margin: 0; letter-spacing: -.3px; }
 .subtitle { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+#collapse { margin-left: auto; flex: none; }
+#compact-panel { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; }
+#compact-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-weight: 600; }
+#expand { flex: none; }
 main { padding: 20px 22px 0; }
 .connection-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .signal { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 #status { font-size: 14px; line-height: 1.4; font-weight: 600; margin: 0; }
-#connection[data-state="ready"] .dot { background: var(--success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 10%, transparent); }
-#connection[data-state="connecting"] .dot, #connection[data-state="waiting"] .dot { background: var(--accent); }
-#connection[data-state="error"] .dot { background: var(--danger); }
+[data-state="ready"] .dot { background: var(--success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 10%, transparent); }
+[data-state="connecting"] .dot, [data-state="waiting"] .dot { background: var(--accent); }
+[data-state="error"] .dot { background: var(--danger); }
 #connection-help { margin: 8px 0 0 16px; color: var(--muted); font-size: 11px; }
 button.quiet { padding: 4px 0; min-height: 26px; background: transparent; border: 0; color: var(--muted); font-size: 11px; }
 button.quiet:hover:not(:disabled) { color: var(--text); background: transparent; text-decoration: underline; }
@@ -87,9 +91,15 @@ footer { padding: 17px 22px 19px; }
 </style>
 </head>
 <body>
+<div id="compact-panel" data-state="offline" hidden>
+  <div class="signal"><span class="dot" aria-hidden="true"></span><p id="compact-status" role="status">Нужно сопряжение</p></div>
+  <button id="expand" type="button">Развернуть</button>
+</div>
+<div id="full-panel">
 <header>
   <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16V7a3 3 0 0 1 3-3h4v6H7v6M20 8v9a3 3 0 0 1-3 3h-4v-6h4V8M8 12h8"/></svg></div>
   <div><h1>Fijma</h1><p class="subtitle">Связь вашего документа с агентом</p></div>
+  <button id="collapse" type="button">Свернуть</button>
 </header>
 <main>
   <section id="connection" data-state="offline" aria-label="Соединение">
@@ -132,6 +142,7 @@ footer { padding: 17px 22px 19px; }
   <div id="remembered" hidden><span id="storage-status" role="status">Сопряжение сохранено</span><button id="forget" class="quiet">Забыть</button></div>
   <p class="local-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="2"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>Соединение только с этим компьютером</p>
 </footer>
+</div>
 <!-- UI_SCRIPT -->
 </body>
 </html>
